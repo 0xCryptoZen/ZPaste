@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 extension Notification.Name {
-    static let showHistoryWindow = Notification.Name("PasteClone.ShowHistoryWindow")
+    static let showHistoryWindow = Notification.Name("ZPaste.ShowHistoryWindow")
 }
 
 /// 启动时开启剪贴板监听、注册全局快捷键，并托管历史窗口。

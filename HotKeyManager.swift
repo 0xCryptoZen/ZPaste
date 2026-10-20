@@ -2,7 +2,7 @@ import AppKit
 import Carbon
 
 extension Notification.Name {
-    static let quickPasteHotKey = Notification.Name("PasteClone.QuickPasteHotKey")
+    static let quickPasteHotKey = Notification.Name("ZPaste.QuickPasteHotKey")
 }
 
 /// 全局快捷键（Carbon RegisterEventHotKey）。

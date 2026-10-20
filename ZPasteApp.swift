@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 @main
-struct PasteCloneApp: App {
+struct ZPasteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -10,7 +10,7 @@ struct PasteCloneApp: App {
             MenuBarView()
                 .modelContainer(Store.container)
         } label: {
-            Label("PasteClone", systemImage: "doc.on.clipboard")
+            Label("z-paste", systemImage: "doc.on.clipboard")
         }
         .menuBarExtraStyle(.window)
     }
