@@ -14,6 +14,7 @@ targets:
           - "project.yml"
           - "Info.plist"
           - "README.md"
+          - ".git"
           - ".github"
     settings:
       base:
