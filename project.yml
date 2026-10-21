@@ -14,9 +14,19 @@ targets:
           - "project.yml"
           - "Info.plist"
           - "README.md"
+          - ".github"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.zpaste
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
         SWIFT_VERSION: "5.0"
+    scheme:
+      testTargets: []
+schemes:
+  ZPaste:
+    build:
+      targets:
+        ZPaste: all
+    run:
+      config: Debug
