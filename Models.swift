@@ -7,11 +7,11 @@ import SwiftData
 @Model
 final class Clip {
     var text: String = ""
-    var createdAt: Date = .now
+    var createdAt: Date = Date.now
     var isPinned: Bool = false
     var sourceAppBundleID: String?
 
-    @Relationship(deleteRule: .nullify, inverse: \Folder.clips)
+    @Relationship(deleteRule: .nullify)
     var folder: Folder?
 
     init(
@@ -33,7 +33,7 @@ final class Clip {
 @Model
 final class Folder {
     var name: String = ""
-    var createdAt: Date = .now
+    var createdAt: Date = Date.now
 
     @Relationship(deleteRule: .nullify, inverse: \Clip.folder)
     var clips: [Clip]? = nil

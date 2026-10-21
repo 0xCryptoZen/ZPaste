@@ -27,5 +27,20 @@ jobs:
             -scheme ZPaste \
             -configuration Debug \
             -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/ZPaste-build" \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Package app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/ZPaste-build/Build/Products/Debug/ZPaste.app" \
+            "$RUNNER_TEMP/ZPaste-macOS.zip"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZPaste-macOS
+          path: ${{ runner.temp }}/ZPaste-macOS.zip
+          if-no-files-found: error
+          retention-days: 14
