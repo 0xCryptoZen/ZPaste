@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import SwiftData
 
-/// 菜单栏下拉面板：最近几条 + 打开历史 + 退出。
+/// Menu-bar drop-down panel: recent clips + open history + quit.
 struct MenuBarView: View {
     @Query(sort: \Clip.createdAt, order: .reverse) private var recentClips: [Clip]
 
@@ -11,15 +11,15 @@ struct MenuBarView: View {
             Button {
                 NotificationCenter.default.post(name: .showHistoryWindow, object: nil)
             } label: {
-                Label("打开历史", systemImage: "clock")
+                Label("Open History", systemImage: "clock")
             }
 
             Divider()
 
             if recentClips.isEmpty {
-                Text("暂无记录").foregroundStyle(.secondary).padding(.vertical, 4)
+                Text("No items yet").foregroundStyle(.secondary).padding(.vertical, 4)
             } else {
-                Text("最近").font(.caption).foregroundStyle(.secondary)
+                Text("Recent").font(.caption).foregroundStyle(.secondary)
                 ForEach(recentClips.prefix(10)) { clip in
                     Button {
                         copy(clip.text)
@@ -35,7 +35,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("退出") {
+            Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
         }

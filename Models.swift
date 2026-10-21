@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
-/// 一条剪贴板历史记录。
-/// 属性都带默认值（CloudKit 同步要求属性可选或有默认值）。
+/// A single clipboard history entry.
+/// All properties carry defaults (CloudKit sync requires optional or
+/// default-valued properties).
 @Model
 final class Clip {
     var text: String = ""
@@ -28,7 +29,7 @@ final class Clip {
     }
 }
 
-/// 分组/文件夹。
+/// A group/folder.
 @Model
 final class Folder {
     var name: String = ""

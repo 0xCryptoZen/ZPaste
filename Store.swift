@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
-/// 全局唯一的模型容器。
-/// 优先 CloudKit 自动同步；失败时回退到纯本地，保证无签名也能启动。
+/// The app-wide model container.
+/// Prefers CloudKit automatic sync; falls back to local-only storage so the
+/// app still launches without signing.
 enum Store {
     static let container: ModelContainer = {
         let schema = Schema([Clip.self, Folder.self])
@@ -14,6 +15,6 @@ enum Store {
         if let c = try? ModelContainer(for: schema, configurations: [localConfig]) {
             return c
         }
-        fatalError("无法初始化模型容器")
+        fatalError("Failed to initialize the model container")
     }()
 }

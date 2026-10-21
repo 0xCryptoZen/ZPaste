@@ -9,8 +9,8 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("开机自启") {
-                Toggle("登录时启动", isOn: $launchAtLogin)
+            Section("Launch at Login") {
+                Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {
                             if enabled {
@@ -24,20 +24,20 @@ struct SettingsView: View {
                     }
             }
 
-            Section("忽略的 App（复制时不记录）") {
+            Section("Ignored Apps (not recorded)") {
                 HStack {
-                    TextField("bundle id，例如 com.1password.1password", text: $newID)
+                    TextField("Bundle ID, e.g. com.1password.1password", text: $newID)
                         .onSubmit { addID() }
-                    Button("添加", action: addID)
+                    Button("Add", action: addID)
                 }
                 if ignoredIDs.isEmpty {
-                    Text("为空：记录所有 App 的复制内容。").foregroundStyle(.secondary).font(.caption)
+                    Text("Empty: copies from all apps are recorded.").foregroundStyle(.secondary).font(.caption)
                 } else {
                     ForEach(ignoredIDs, id: \.self) { id in
                         HStack {
                             Text(id).textSelection(.enabled)
                             Spacer()
-                            Button("移除") {
+                            Button("Remove") {
                                 ignoredIDs.removeAll { $0 == id }
                                 save()
                             }
@@ -46,14 +46,14 @@ struct SettingsView: View {
                 }
             }
 
-            Section("iCloud 同步") {
-                Text("数据通过 CloudKit 自动同步。首次使用需在 Xcode 的 Signing & Capabilities 中开启 iCloud 能力，选择 CloudKit 并指定容器。")
+            Section("iCloud Sync") {
+                Text("Data syncs automatically via CloudKit. To enable it, add the iCloud capability (CloudKit) in Xcode's Signing & Capabilities and specify a container.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("全局快捷键") {
-                Text("⌘⇧V 呼出历史窗口（当前为固定快捷键，后续版本可自定义）。")
+            Section("Global Hotkey") {
+                Text("Press ⌘⇧V to open the history window (fixed for now; customizable in a future version).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

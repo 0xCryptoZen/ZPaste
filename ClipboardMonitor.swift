@@ -2,11 +2,13 @@ import AppKit
 import Foundation
 import SwiftData
 
-/// 轮询系统剪贴板，把新增的文本历史写入 SwiftData。
-/// macOS 没有公开的“剪贴板变化”通知，所以用 changeCount 轮询是标准做法。
+/// Polls the system pasteboard and writes new text entries into SwiftData.
+/// macOS exposes no public clipboard-changed notification, so polling
+/// `changeCount` is the standard approach.
 @MainActor
 final class ClipboardMonitor {
-    /// 标记“自己往剪贴板写内容”的变化（例如从历史里点“复制”），避免重复入库。
+    /// Flags changes caused by our own writes to the pasteboard (e.g. clicking
+    /// "Copy" in history), so they are not re-captured.
     static var skipNextChange = false
 
     private let pasteboard = NSPasteboard.general
@@ -40,20 +42,20 @@ final class ClipboardMonitor {
         guard count != lastChangeCount else { return }
         lastChangeCount = count
 
-        // 自己写入剪贴板的变化不重新入库。
+        // Don't re-capture changes we wrote ourselves.
         if Self.skipNextChange {
             Self.skipNextChange = false
             return
         }
 
-        // 忽略来自敏感应用（黑名单）的复制内容。
+        // Ignore content copied from ignored (sensitive) apps.
         guard !isFrontmostAppIgnored() else { return }
 
         guard let text = pasteboard.string(forType: .string) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        // 与最近一条去重（避免重复入库）。
+        // Deduplicate against the latest entry.
         if latestClipText() == text { return }
 
         let clip = Clip(text: text, sourceAppBundleID: frontmostBundleID)
@@ -76,7 +78,7 @@ final class ClipboardMonitor {
         return ignoredBundleIDs.contains(id)
     }
 
-    /// 从 UserDefaults 读取忽略列表（设置页写入）。
+    /// Reads the ignore list from UserDefaults (written by the settings view).
     private var ignoredBundleIDs: Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: "ignoredBundleIDs") ?? [])
     }

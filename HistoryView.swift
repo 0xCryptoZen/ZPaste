@@ -35,7 +35,7 @@ struct HistoryView: View {
                 Button {
                     selectedFolderID = nil
                 } label: {
-                    Label("全部", systemImage: "tray")
+                    Label("All", systemImage: "tray")
                         .foregroundStyle(selectedFolderID == nil ? Color.primary : Color.secondary)
                 }
                 .buttonStyle(.plain)
@@ -55,7 +55,7 @@ struct HistoryView: View {
             VStack(spacing: 0) {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索…", text: $searchText)
+                    TextField("Search…", text: $searchText)
                         .textFieldStyle(.plain)
                     Spacer()
                     Button {
@@ -63,13 +63,13 @@ struct HistoryView: View {
                     } label: {
                         Image(systemName: "folder.badge.plus")
                     }
-                    .help("新建文件夹")
+                    .help("New Folder")
                     Button {
                         showingSettings = true
                     } label: {
                         Image(systemName: "gearshape")
                     }
-                    .help("设置")
+                    .help("Settings")
                 }
                 .padding(10)
 
@@ -77,7 +77,7 @@ struct HistoryView: View {
 
                 if filteredClips.isEmpty {
                     Spacer()
-                    Text("复制点东西，这里就会出现历史").foregroundStyle(.secondary)
+                    Text("Copy something and it will show up here").foregroundStyle(.secondary)
                     Spacer()
                 } else {
                     List(filteredClips) { clip in
@@ -87,10 +87,10 @@ struct HistoryView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 480)
-        .alert("新建文件夹", isPresented: $showingNewFolder) {
-            TextField("名称", text: $newFolderName)
-            Button("创建") { createFolder() }
-            Button("取消", role: .cancel) { newFolderName = "" }
+        .alert("New Folder", isPresented: $showingNewFolder) {
+            TextField("Name", text: $newFolderName)
+            Button("Create") { createFolder() }
+            Button("Cancel", role: .cancel) { newFolderName = "" }
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
@@ -106,7 +106,7 @@ struct HistoryView: View {
     }
 }
 
-/// 单条历史记录。
+/// A single history entry.
 private struct ClipRow: View {
     @Environment(\.modelContext) private var context
     let clip: Clip
@@ -138,20 +138,20 @@ private struct ClipRow: View {
                     .foregroundStyle(clip.isPinned ? .yellow : .secondary)
             }
             .buttonStyle(.borderless)
-            .help(clip.isPinned ? "取消固定" : "固定")
+            .help(clip.isPinned ? "Unpin" : "Pin")
         }
         .padding(.vertical, 2)
         .contextMenu {
-            Button("复制") { copy() }
-            Button("复制并粘贴到前台 App") { copyAndPaste() }
-            Menu("移动到文件夹") {
-                Button("无") { move(to: nil) }
+            Button("Copy") { copy() }
+            Button("Copy & Paste to Frontmost App") { copyAndPaste() }
+            Menu("Move to Folder") {
+                Button("None") { move(to: nil) }
                 ForEach(folders) { folder in
                     Button(folder.name) { move(to: folder) }
                 }
             }
             Divider()
-            Button("删除", role: .destructive) { delete() }
+            Button("Delete", role: .destructive) { delete() }
         }
     }
 
@@ -163,7 +163,7 @@ private struct ClipRow: View {
 
     private func copyAndPaste() {
         copy()
-        // 需要“辅助功能”权限；未授权时只完成复制。
+        // Requires the Accessibility permission; otherwise it only copies.
         let src = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true) // V
         down?.flags = .maskCommand
