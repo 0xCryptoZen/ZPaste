@@ -172,6 +172,23 @@ struct VaultStorageTests {
         precondition(retained.count == 2)
         await large.lock()
 
+        // A complete small-store cache must still preview legacy items above the UI budget.
+        stage("oversized cached search")
+        let cachedPaths = StorePaths(directory: root.appendingPathComponent("cached-large"), legacy: root.appendingPathComponent("cached-large-old.store"))
+        try await legacyFixture(at: cachedPaths.legacy, count: 1, textBytes: 3 * 1024 * 1024 + 512)
+        let cachedLarge = VaultRepository(paths: cachedPaths)
+        _ = try await cachedLarge.unlock(key: key, lease: VaultLease())
+        let cachedSummary = try await cachedLarge.summary()
+        precondition(cachedSummary.payloadBytes < VaultLimits.decryptedCacheBytes)
+        for budget in [3 * 1024 * 1024, VaultLimits.quickDisplayBytes] {
+            let result = try await cachedLarge.page(scope: .all, search: "private-body-marker", byteLimit: budget)
+            precondition(result.clips.count == 1 && result.clips[0].isPreviewOnly)
+            precondition(result.clips[0].text.utf8.count <= 2_048 && result.nextOffset == nil)
+            let original = try await cachedLarge.text(result.clips[0].id)
+            precondition(original.utf8.count > 3 * 1024 * 1024)
+        }
+        await cachedLarge.lock()
+
         let pins = VaultRepository(paths: paths, memoryOnly: true)
         stage("pin limit")
         _ = try await pins.unlock(key: key, lease: VaultLease())

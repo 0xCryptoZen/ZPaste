@@ -270,6 +270,8 @@ actor VaultRepository {
             let value = try payload(record)
             let source = value.source.map { VaultLimits.displayPrefix($0, bytes: 256) }
             let size = value.text.utf8.count + (source?.utf8.count ?? 0)
+            // Grandfathered records use the bounded preview path even in a warm cache.
+            if size > byteLimit { return nil }
             if bytes + size > byteLimit { page.nextOffset = index; return page }
             bytes += size
             page.clips.append(ClipItem(id: metadata.id, text: value.text, createdAt: metadata.createdAt,
