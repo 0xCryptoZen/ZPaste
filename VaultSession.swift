@@ -4,7 +4,7 @@ import CryptoKit
 
 @MainActor
 final class VaultSession: ObservableObject {
-    enum State { case locked, unlocking, ready, failed }
+    enum State { case locked, unlocking, ready, failed, deleting }
     static let shared = VaultSession()
     @Published private(set) var state: State = .locked
     @Published private(set) var revision = UUID()
@@ -19,18 +19,23 @@ final class VaultSession: ObservableObject {
     private var refreshing = false
     private var needsRefresh = false
     private var deleting = false
-    private let keychain = VaultKeychain()
+    private let keychain: any VaultKeyProviding
+    private let captureAllowed: Bool
+    private let preview: Bool
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private lazy var monitor = ClipboardMonitor(session: self)
     var isUnlocked: Bool { state == .ready }
     var retention: RetentionSettings {
         RetentionSettings(days: UserDefaults.standard.integer(forKey: "retentionDays"),
                           limit: UserDefaults.standard.integer(forKey: "historyLimit"),
-                          enabled: !UserDefaults.standard.bool(forKey: "legacyPolicyPending"))
+                          enabled: true)
     }
 
-    private init() {
-        do { repository = VaultRepository(paths: try StorePaths.standard(), memoryOnly: UIPreviewData.enabled) }
+    init(repository: VaultRepository? = nil, keyProvider: any VaultKeyProviding = VaultKeychain(),
+         captureAllowed: Bool = true, preview: Bool = UIPreviewData.enabled) {
+        self.keychain = keyProvider; self.captureAllowed = captureAllowed; self.preview = preview
+        if let repository { self.repository = repository; return }
+        do { self.repository = VaultRepository(paths: try StorePaths.standard(), memoryOnly: preview) }
         catch { errorMessage = VaultError.storage.localizedDescription; state = .failed }
     }
 
@@ -42,7 +47,7 @@ final class VaultSession: ObservableObject {
         observe(DistributedNotificationCenter.default(), Notification.Name("com.apple.screenIsLocked")) { $0.lock() }
         observe(NotificationCenter.default, UserDefaults.didChangeNotification) { $0.updateMonitoring() }
         observe(NotificationCenter.default, .historyPolicyChanged) { $0.cleanup() }
-        if UIPreviewData.enabled { unlock() }
+        if preview { unlock() }
     }
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name, action: @escaping (VaultSession) -> Void) {
@@ -69,13 +74,13 @@ final class VaultSession: ObservableObject {
             do {
                 let existing = await repository.requiresExistingKey()
                 let key: SymmetricKey
-                if UIPreviewData.enabled { key = SymmetricKey(size: .bits256) }
+                if self?.preview == true { key = SymmetricKey(size: .bits256) }
                 else {
                     key = try await Task.detached { try keychain.load(createIfMissing: !existing, reason: "Unlock your encrypted clipboard history") }.value
                 }
                 try lease.check()
                 let migrated = try await repository.unlock(key: key, lease: lease)
-                if UIPreviewData.enabled { try await UIPreviewData.populate(repository) }
+                if self?.preview == true { try await UIPreviewData.populate(repository) }
                 try lease.check()
                 guard let self, self.generation == epoch else { return }
                 if migrated { UserDefaults.standard.set(true, forKey: "legacyPolicyPending") }
@@ -98,6 +103,7 @@ final class VaultSession: ObservableObject {
     }
 
     func lock() {
+        let expiredLease = lease
         lease?.invalidate(); lease = nil
         keychain.cancel()
         operation?.cancel(); operation = nil
@@ -110,7 +116,7 @@ final class VaultSession: ObservableObject {
         recent = []; summary = VaultSummary(); errorMessage = nil
         AppStatus.shared.clear()
         SourceApplication.clear()
-        if let repository { Task { await repository.lock() } }
+        if let repository, let expiredLease { Task { await repository.lock(lease: expiredLease) } }
     }
 
     func fail(_ error: Error) {
@@ -120,7 +126,7 @@ final class VaultSession: ObservableObject {
     }
 
     func updateMonitoring() {
-        guard isUnlocked, !UIPreviewData.enabled, !UserDefaults.standard.bool(forKey: "capturePaused") else { monitor.stop(); return }
+        guard isUnlocked, captureAllowed, !preview, !UserDefaults.standard.bool(forKey: "capturePaused") else { monitor.stop(); return }
         if !monitor.isRunning { monitor.start() }
     }
 
@@ -150,7 +156,7 @@ final class VaultSession: ObservableObject {
             let epoch = generation
             do {
                 let summary = try await repository.summary()
-                let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.payloadBytes / 4, recent: true)
+                let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.payloadBytes / 5, recent: true)
                 guard epoch == generation, isUnlocked else { return }
                 self.summary = summary; self.recent = recent.clips
                 revision = UUID()
@@ -183,11 +189,14 @@ final class VaultSession: ObservableObject {
     func deleteEverything() {
         guard isUnlocked, !deleting, let repository else { return }
         deleting = true
+        state = .deleting
+        monitor.stop()
+        PasteController.shared.cancelDelivery()
         let epoch = generation
         operation = Task { [weak self, keychain] in
             do {
                 _ = try await Task.detached { try keychain.load(createIfMissing: false, reason: "Delete all clipboard history, including pins and folders") }.value
-                guard let self, epoch == self.generation, self.isUnlocked else { return }
+                guard let self, epoch == self.generation, self.state == .deleting else { return }
                 try await repository.clear(includePinned: true)
                 guard epoch == self.generation else { return }
                 self.lock()

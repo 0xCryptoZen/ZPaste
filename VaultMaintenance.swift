@@ -8,12 +8,7 @@ extension VaultRepository {
         do {
             if try summary().payloadBytes > VaultLimits.payloadBytes { throw VaultError.capacity }
             try clean(retention: retention, now: now)
-            var duplicate: VaultRecord?
-            if merge {
-                try batches(request()) { record in
-                    if duplicate == nil, try payload(record).text == text { duplicate = record }
-                }
-            }
+            let duplicate = merge ? try duplicate(text) : nil
             var metadata = try duplicate?.metadata() ?? RecordMetadata(id: UUID(), kind: .clip, createdAt: now, isPinned: false, folderID: nil)
             metadata.createdAt = now
             let value = RecordPayload(text: text, source: source)
@@ -49,7 +44,7 @@ extension VaultRepository {
             try checkLease()
             let records = try context.fetch(descriptor)
             if records.isEmpty { break }
-            for record in records { _ = try payload(record); context.delete(record) }
+            for record in records { _ = try payload(record); try remove(record) }
             try save()
         }
     }
@@ -99,19 +94,25 @@ extension VaultRepository {
             let metadata = try record.metadata()
             _ = try payload(record)
             if metadata.kind == .folder {
-                try batches(request(scope: .folder(id))) { clip in
+                // Iterate a stable result set: changing folderID must not shrink the paged predicate.
+                try batches(request()) { clip in
+                    guard clip.folderID == id else { return }
                     let value = try payload(clip)
                     var metadata = try clip.metadata(); metadata.folderID = nil
                     try write(metadata, payload: value, existing: clip)
                 }
             }
-            context.delete(record)
+            try remove(record)
             try save()
         } catch { context.rollback(); throw error }
     }
 
     func clear(includePinned: Bool) throws {
-        if includePinned { try deleteBatches(FetchDescriptor<VaultRecord>()) }
+        if includePinned {
+            // Every committed batch must remain valid if locking interrupts the operation.
+            try deleteBatches(request())
+            try deleteBatches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "folder" }))
+        }
         else { try deleteBatches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "clip" && !$0.isPinned })) }
     }
 }

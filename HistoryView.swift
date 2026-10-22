@@ -6,13 +6,13 @@ struct VaultLockedView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "lock.shield").font(.system(size: 38)).foregroundStyle(.secondary)
-            Text(vault.state == .unlocking ? "Unlocking History…" : "History Is Locked").font(.title2.weight(.semibold))
+            Text(vault.state == .deleting ? "Deleting History…" : (vault.state == .unlocking ? "Unlocking History…" : "History Is Locked")).font(.title2.weight(.semibold))
             Text("History stays encrypted on this Mac. Unlock with Touch ID or your system password to view it and record future copies.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 370)
             if let error = vault.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center).frame(maxWidth: 420)
             }
-            if vault.state == .unlocking {
+            if vault.state == .unlocking || vault.state == .deleting {
                 ProgressView().controlSize(.small)
                 Button("Cancel") { vault.lock() }
             } else {
@@ -61,85 +61,8 @@ private struct UnlockedHistoryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $scope) {
-                Section("Library") {
-                    Label("All History", systemImage: "tray.full").badge(vault.summary.count).tag(HistoryScope.all)
-                    Label("Pinned", systemImage: "pin").badge(vault.summary.pinned).tag(HistoryScope.pinned)
-                }
-                Section("Folders") {
-                    ForEach(vault.summary.folders) { folder in
-                        Label(folder.name, systemImage: "folder").badge(folder.count).tag(HistoryScope.folder(folder.id))
-                            .contextMenu {
-                                Button("Rename…") { editingFolder = folder; showingFolderEditor = true }
-                                Button("Delete Folder…", role: .destructive) { deletingFolder = folder }
-                            }
-                    }
-                }
-            }
-            .listStyle(.sidebar).navigationTitle("ZPaste")
-            .navigationSplitViewColumnWidth(min: 170, ideal: 210, max: 280)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Button("New Folder", systemImage: "plus") { editingFolder = nil; showingFolderEditor = true }
-                    Spacer()
-                    Button { openSettings() } label: { Image(systemName: "gearshape") }.help("Settings")
-                }.buttonStyle(.borderless).padding(14)
-            }
-        } detail: {
-            VStack(spacing: 0) {
-                if UIPreviewData.enabled {
-                    Label("UI Preview · Sample data only · Clipboard unchanged", systemImage: "eye")
-                        .font(.caption).padding(12).frame(maxWidth: .infinity).background(.orange.opacity(0.12))
-                }
-                if model.page.clips.isEmpty {
-                    ContentUnavailableView(search.isEmpty ? "No History Here" : "No Results", systemImage: search.isEmpty ? "clipboard" : "magnifyingglass",
-                        description: Text(paused ? "Recording is paused. Resume to save future copies." : "Copy text or choose a different search or folder."))
-                } else {
-                    List(selection: $selectedID) {
-                        ForEach(HistorySection.allCases) { section in
-                            let items = model.page.clips.filter { ClipboardPresentation.section(createdAt: $0.createdAt, pinned: $0.isPinned) == section }
-                            if !items.isEmpty {
-                                Section(section.rawValue) {
-                                    ForEach(items) { clip in
-                                        ClipRowView(clip: clip, folders: vault.summary.folders) { selectedID = clip.id } onPreview: {
-                                            selectedID = clip.id; preview = clip
-                                        }.tag(clip.id)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.inset).focused($listFocused)
-                    .onKeyPress(.return) { useSelected(); return .handled }
-                    .onKeyPress(.space) { preview = selected; return .handled }
-                    .onKeyPress(.escape) { NSApp.hide(nil); return .handled }
-                }
-                Divider()
-                footer
-                if let error = status.errorMessage {
-                    HStack {
-                        Label(error, systemImage: "exclamationmark.triangle").font(.caption)
-                        Spacer()
-                        Button("Dismiss") { status.errorMessage = nil }
-                    }.padding(12).background(.bar)
-                }
-            }.navigationTitle(title)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { preview = selected } label: { Label("Preview", systemImage: "eye") }.disabled(selected == nil)
-                Button { if let selected { vault.use(selected.id, copyOnly: true) } } label: { Label("Copy", systemImage: "doc.on.doc") }.disabled(selected == nil)
-                Button { paused.toggle(); vault.updateMonitoring() } label: { Label(paused ? "Resume" : "Pause", systemImage: paused ? "play.circle" : "pause.circle") }
-                Button { vault.lock() } label: { Label("Lock", systemImage: "lock") }
-                Menu {
-                    Button("New Folder…") { editingFolder = nil; showingFolderEditor = true }
-                    Button("Settings…") { openSettings() }.keyboardShortcut(",", modifiers: .command)
-                    Divider()
-                    Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }
-                } label: { Label("More", systemImage: "ellipsis.circle") }
-            }
-        }
+        NavigationSplitView { sidebar } detail: { detail }
+        .toolbar { historyToolbar }
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Search encrypted history")
         .onSubmit(of: .search) { listFocused = true }
         .task(id: query) { await model.load(scope: scope ?? .all, search: search, offset: offset) }
@@ -171,6 +94,94 @@ private struct UnlockedHistoryView: View {
                 Task { _ = await vault.mutate { try await $0.clear(includePinned: false) } }
             }
         }
+    }
+
+    private var sidebar: some View {
+            List(selection: $scope) {
+                Section("Library") {
+                    Label("All History", systemImage: "tray.full").badge(vault.summary.count).tag(HistoryScope.all)
+                    Label("Pinned", systemImage: "pin").badge(vault.summary.pinned).tag(HistoryScope.pinned)
+                }
+                Section("Folders") {
+                    ForEach(vault.summary.folders) { folder in
+                        Label(folder.name, systemImage: "folder").badge(folder.count).tag(HistoryScope.folder(folder.id))
+                            .contextMenu {
+                                Button("Rename…") { editingFolder = folder; showingFolderEditor = true }
+                                Button("Delete Folder…", role: .destructive) { deletingFolder = folder }
+                            }
+                    }
+                }
+            }
+            .listStyle(.sidebar).navigationTitle("ZPaste")
+            .navigationSplitViewColumnWidth(min: 170, ideal: 210, max: 280)
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Button("New Folder", systemImage: "plus") { editingFolder = nil; showingFolderEditor = true }
+                    Spacer()
+                    Button { openSettings() } label: { Image(systemName: "gearshape") }.help("Settings")
+                }.buttonStyle(.borderless).padding(14)
+            }
+    }
+
+    private var detail: some View {
+            VStack(spacing: 0) {
+                if UIPreviewData.enabled {
+                    Label("UI Preview · Sample data only · Clipboard unchanged", systemImage: "eye")
+                        .font(.caption).padding(12).frame(maxWidth: .infinity).background(.orange.opacity(0.12))
+                }
+                if model.page.clips.isEmpty {
+                    ContentUnavailableView(search.isEmpty ? "No History Here" : "No Results", systemImage: search.isEmpty ? "clipboard" : "magnifyingglass",
+                        description: Text(paused ? "Recording is paused. Resume to save future copies." : "Copy text or choose a different search or folder."))
+                } else {
+                    historyList
+                }
+                Divider()
+                footer
+                if let error = status.errorMessage {
+                    HStack {
+                        Label(error, systemImage: "exclamationmark.triangle").font(.caption)
+                        Spacer()
+                        Button("Dismiss") { status.errorMessage = nil }
+                    }.padding(12).background(.bar)
+                }
+            }.navigationTitle(title)
+    }
+
+    private var historyList: some View {
+                    List(selection: $selectedID) {
+                        ForEach(HistorySection.allCases) { section in
+                            let items = model.page.clips.filter { ClipboardPresentation.section(createdAt: $0.createdAt, pinned: $0.isPinned) == section }
+                            if !items.isEmpty {
+                                Section(section.rawValue) {
+                                    ForEach(items) { clip in
+                                        ClipRowView(clip: clip, folders: vault.summary.folders) { selectedID = clip.id } onPreview: {
+                                            selectedID = clip.id; preview = clip
+                                        }.tag(clip.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.inset).focused($listFocused)
+                    .onKeyPress(.return) { useSelected(); return .handled }
+                    .onKeyPress(.space) { preview = selected; return .handled }
+                    .onKeyPress(.escape) { NSApp.hide(nil); return .handled }
+    }
+
+    @ToolbarContentBuilder
+    private var historyToolbar: some ToolbarContent {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { preview = selected } label: { Label("Preview", systemImage: "eye") }.disabled(selected == nil)
+                Button { if let selected { vault.use(selected.id, copyOnly: true) } } label: { Label("Copy", systemImage: "doc.on.doc") }.disabled(selected == nil)
+                Button { paused.toggle(); vault.updateMonitoring() } label: { Label(paused ? "Resume" : "Pause", systemImage: paused ? "play.circle" : "pause.circle") }
+                Button { vault.lock() } label: { Label("Lock", systemImage: "lock") }
+                Menu {
+                    Button("New Folder…") { editingFolder = nil; showingFolderEditor = true }
+                    Button("Settings…") { openSettings() }.keyboardShortcut(",", modifiers: .command)
+                    Divider()
+                    Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }
+                } label: { Label("More", systemImage: "ellipsis.circle") }
+            }
     }
 
     private var footer: some View {

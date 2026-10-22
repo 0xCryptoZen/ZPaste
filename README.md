@@ -1,124 +1,70 @@
-# z-paste
+# ZPaste
 
-A menu-bar clipboard manager for macOS built with SwiftUI + SwiftData + CloudKit, featuring global hotkeys, folder grouping, and automatic iCloud sync.
+A small native macOS clipboard history tool built with SwiftUI, AppKit, and SwiftData. Runtime dependencies are Apple system frameworks only. Requires macOS 14 or later.
 
-A clipboard history tool for macOS that mirrors the user-visible behavior of [Paste](https://pasteapp.io/) (Paste.app), implemented independently from scratch (contains no Paste code).
+## Local encrypted history
 
-> Clipboard history, global hotkey, search, pin, folders, ignored apps, launch at login, and iCloud sync.
+- History is local only. There is no CloudKit synchronization, analytics, link preview fetching, or plaintext file export.
+- Text, source application identifiers, and folder names are encrypted with CryptoKit AES-256-GCM before reaching SwiftData. Each write uses a fresh nonce. IDs, timestamps, pin status, folder relationships, record type, and format version are authenticated operational metadata; they remain visible in the database.
+- The random 256-bit key is stored in the macOS Data Protection Keychain with `WhenUnlockedThisDeviceOnly`, synchronization disabled, and `userPresence` access control. Reading the key itself requires Touch ID or the system password; an application-only authentication dialog is not used as a substitute.
+- The app starts locked. Unlock explicitly to view history and record future copies. Screen lock, sleep, user switching, or Lock Now stops recording, cancels pending delivery and queries, hides history, and releases plaintext/key references. This does not guarantee that Swift or macOS zeroed every memory copy.
+- The app clears the system clipboard on lock only if it still contains ZPaste's own most recent write. It never clears a later copy made by another app.
+- Keychain denial, missing keys, authentication failures, corrupted ciphertext, and storage errors fail closed. There is no plaintext fallback and no automatic replacement of a missing key for an existing store.
 
-## Features
+The main threats addressed are readable history files, casual unauthorized access, accidental plaintext persistence, and misdirected paste. Encryption does not defeat malware controlling the logged-in session, privileged processes, screen capture, or other apps reading the system clipboard after you copy. Per-record authentication does not provide rollback protection for entire database snapshots.
 
-- Clipboard history (text)
-- Global hotkey `⌘⇧V` to open the history window
-- Menu-bar resident (no Dock icon)
-- Search
-- Pin
-- Folders / groups
-- Ignore sensitive apps (deny list — copies are not recorded)
-- Launch at login (SMAppService)
-- iCloud sync (SwiftData + CloudKit)
+Direct paste is retained and needs Accessibility permission. This distribution does **not** claim full App Sandbox isolation. Offline application code is not an OS-enforced network firewall. Hardened Runtime is enabled in the project; Developer ID signing and notarization require your own signing identity and are separate release checks.
 
-## Requirements
+## Upgrading old history
 
-- macOS 14.0+
-- Xcode 15+ (16/26 recommended)
-- iCloud sync requires an Apple Developer account + iCloud container
+On the first authenticated unlock, ZPaste opens only the exact historical SwiftData default store, with saving and CloudKit disabled. It imports records in batches into a separate encrypted store, retaining text, dates, pins, source IDs, folders, and relationships without applying new limits during migration. Each imported record is checked, then the complete encrypted store is reopened and verified before the commit marker is published and old SQLite files are removed.
 
-## Layout
+Interrupted, uncommitted imports restart from the untouched original. Unknown or unreadable stores stop migration and remain in place. ZPaste does not create a plaintext backup or attempt to infer arbitrary store paths. Keep the bundle identifier stable across upgrades so the original default location and Keychain identity remain discoverable.
 
-```
-z-paste/
-├── ZPasteApp.swift           # @main entry point, MenuBarExtra
-├── Store.swift               # SwiftData container (CloudKit → local fallback)
-├── Models.swift              # Clip / Folder entities
-├── ClipboardMonitor.swift    # Pasteboard polling + dedup + ignore list
-├── HotKeyManager.swift       # Carbon global hotkey ⌘⇧V
-├── AppDelegate.swift         # Launch setup + hosts the history window
-├── MenuBarView.swift         # Menu-bar drop-down panel
-├── HistoryView.swift         # Main window (search / folders / pin / copy / paste)
-├── SettingsView.swift        # Settings (launch at login / ignore list)
-├── ZPaste.entitlements       # iCloud CloudKit entitlement template
-├── Info.plist                # Info.plist used by XcodeGen (includes LSUIElement)
-├── project.yml               # XcodeGen project definition
-└── README.md
-```
+Deleting old local files cannot erase SSD remnants, Time Machine copies, or past CloudKit data. Old iCloud copies require separate management in the relevant Apple account; this version never connects to CloudKit to delete them. Migration is not an encrypted cross-device backup feature.
 
-## Quick build (recommended)
+**Losing the device-only key makes the history unreadable.** Moving the database to another Mac, changing signing/access-group identity, or deleting the Keychain item can prevent access. No recovery password, exported key, cloud key synchronization, or silent key reset is provided. Preserve the original Mac/key and stable signing identity. Storage or key errors never authorize automatic deletion of the encrypted database.
 
-Generate the project with [XcodeGen](https://github.com/yonaskolb/XcodeGen):
+## Recording and limits
 
-```bash
+- New installations default to 7 days and 500 unpinned items. Existing installations keep their old policy until they explicitly confirm changes. Settings offers the recommended limits with a destructive-cleanup confirmation.
+- New text is limited to 256 KiB of UTF-8. Encrypted payload capacity is 20 MiB; this is a logical payload limit, not a promise that SQLite/WAL files occupy exactly that much disk space. Up to 100 new pins are allowed.
+- Existing oversized records and excess pins are retained during migration. Over-capacity histories pause new recording until you remove items or explicitly apply a suitable retention policy. Pins are never removed by automatic retention or Clear Unpinned History.
+- Oversized legacy text can have a shortened UI preview. Copy and paste retrieve the complete authenticated text; stored data is not truncated. A single deliberately opened legacy record can temporarily exceed the normal display-cache budget.
+- Pause and lock stop the 300 ms capture timer. Resuming records future changes only. Polling has a 50 ms tolerance; cleanup is scheduled separately while unlocked.
+- Confidential, transient, and autogenerated clipboard markers are filtered by default. Add sensitive apps to the ignored-app list. Unknown sources and copies around an observed app transition are skipped. Polling cannot reliably establish clipboard ownership or detect all passwords, private keys, recovery phrases, browser password fields, or unmarked secrets.
+
+Settings includes Clear Unpinned History and Delete ALL History. The latter includes pins and folders, requires confirmation and a fresh Keychain authentication, then locks the app. Removal is logical deletion, not guaranteed secure erasure of historical encrypted pages or backups.
+
+## Using history
+
+- `⌘⇧V` opens the reusable compact search panel. The global shortcut can be changed in Settings; registration conflicts leave the old shortcut intact.
+- Type to search, use arrows to select, Return to execute the configured copy/paste action, and Escape to hide the app. Single click selects; double click executes. The full history window supports Space to preview, an explicit Copy button, pinning, and folders.
+- Choose a destination input before opening ZPaste. Automatic paste rechecks the target process, unlock state, cancellation, and clipboard change count before sending `⌘V`. Without Accessibility access, text is copied and you can paste manually.
+- The menu panel shows eight recent items. Full history is paged in groups of 100. Search is debounced by 150 ms and decrypts bounded batches while unlocked; no persistent plaintext search index exists. A bounded, ephemeral keyed fingerprint map accelerates duplicate lookup and is discarded on lock.
+
+## Build and validation
+
+```sh
 brew install xcodegen
-cd z-paste
 xcodegen generate
 open ZPaste.xcodeproj
 ```
 
-Then press `⌘R`. Local runs need no signing; iCloud sync must be enabled separately (see step 5 below).
+Use a stable bundle ID and a signing identity appropriate for macOS Data Protection Keychain access. Do not remove the Keychain ACL or switch to a less protected Keychain to make an unsigned development build work. Unsigned CI artifacts prove compilation and synthetic tests only; Keychain, Touch ID/system password, lock-screen behavior, and Accessibility require signed, on-device validation.
 
-## Manual build (without XcodeGen)
+```sh
+bash scripts/test-policies.sh
+bash scripts/test-presentation.sh
+bash scripts/test-cipher.sh
+# Full Xcode is required for SwiftData macros:
+bash scripts/test-storage.sh
+bash scripts/test-vault-storage.sh
+bash scripts/test-vault-session.sh
+```
 
-The repo does not commit a `.xcodeproj`. Create one in Xcode in about 5 minutes:
+Tests use synthetic content and disposable stores. They cover authenticated metadata, corruption/wrong-key rejection, migration and restart behavior, plaintext marker scans of stored files, retention/pin preservation, paging/search, and cancellation across lock/authentication boundaries. Fake Keychain tests verify orchestration only; they do not prove OS-enforced authentication.
 
-1. **New project**: Xcode → File → New → Project → macOS → **App**.
-   - Product Name: `ZPaste`
-   - Interface: `SwiftUI`, Language: `Swift`
-   - Uncheck "Use Core Data" and "Include Tests".
+CI builds an unsigned Release app and uploads it as `ZPaste-macOS`. Never describe that archive as signed, notarized, or validated against real user credentials. Before distribution, sign with Developer ID, notarize and staple the result, verify its actual entitlements/runtime flags, and complete the signed-device checklist in [VALIDATION.md](VALIDATION.md).
 
-2. **Add sources**: delete the template's `ContentView.swift`; drag all the `.swift` files in this folder into the project (drop them into the `ZPaste` group), check "Copy items if needed", and add them to the `ZPaste` target.
-   - `ZPasteApp.swift` overrides the template's `@main` entry file.
-
-3. **Minimum deployment**: select the target → General → Minimum Deployments → **macOS 14.0**.
-
-4. **Menu-bar app (no Dock icon)**: select the target → Info tab, add a row
-   - Key: `Application is agent (UIElement)`, Value: `YES`
-   (equivalent to `LSUIElement = true` in Info.plist)
-
-5. **(Optional; skip for local runs) Enable iCloud sync**:
-   - target → Signing & Capabilities → select your Team (requires an Apple Developer account)
-   - `+ Capability` → **iCloud** → check **CloudKit** → add a container under Containers, e.g. `iCloud.com.yourname.zpaste`
-   - or use this folder's `ZPaste.entitlements` (replace `iCloud.com.example.zpaste` with your own container id) and point Build Settings → Code Signing Entitlements at it
-
-6. **Run**: `⌘R`. The app won't appear in the Dock; it appears in the menu bar (📋 icon).
-
-## Usage
-
-- Copy some text and it will show up in the history window.
-- Click the menu-bar icon → "Open History", or press `⌘⇧V`.
-- Right-click an entry: Copy / Copy & Paste to frontmost app / Move to folder / Delete.
-- "Copy & Paste" synthesizes `⌘V` and requires the **Accessibility** permission: System Settings → Privacy & Security → Accessibility → enable z-paste.
-
-## FAQ
-
-- **Concurrency / actor-isolation compile errors**: set Build Settings → Swift Language Version to **Swift 5** (the template default), or annotate the relevant types as `@MainActor`.
-- **iCloud isn't syncing**: confirm you selected a Team, added the iCloud capability and a container, and that the container id in the entitlements matches the developer portal; sign in to the same iCloud account on first sync.
-- **No clipboard entries**: press `⌘⇧V` to open the window and confirm the app is running in the menu bar; some full-screen/protected apps may not trigger.
-- **"Copy & Paste" does nothing**: check that the Accessibility permission is granted, then restart the app.
-
-## Disclaimer
-
-This project is for learning and research only and is an independent implementation; it contains no code from Paste or its team. Paste is a trademark of Paste Team ApS.
-## History actions and management
-
-- Place the cursor in your destination input, then open ZPaste with the global shortcut or menu-bar icon. Click a history item to paste plain text back into that app. This requires Accessibility access in System Settings → Privacy & Security → Accessibility. Without access, the item is copied and ZPaste explains how to enable pasting.
-- Settings → General → Clicking a History Item can switch clicks to **Copy to clipboard only**. Right-click any item for explicit Paste / Copy Only actions.
-- Settings → Keyboard Shortcuts records a new global shortcut and checks registration before saving it. Use Command, Control, or Option; Escape cancels recording. The default is ⌘⇧V. In History, ⌘F focuses search, arrows select a row, Return uses it, and Escape closes the window.
-- History retention supports 1 day, 1 week, 30 days, 365 days, or forever (default). An optional limit keeps the newest 100 / 500 / 1,000 / 5,000 unpinned items. Changes clean existing history immediately; cleanup also runs on launch, every minute, and after a capture. **Pins are exempt**, while unpinned items inside folders follow the same policy.
-- Pause/resume recording from History, the menu-bar panel, or Settings. Resuming captures future copies only. Duplicate merging brings matching text to the top while preserving its pin and folder; it can be disabled.
-- Settings → Privacy filters source apps and clipboard items marked confidential, temporary, or automatically generated. Confidential markers are supplied by other apps; this is not a general secret detector. Add sensitive apps with the application picker or their bundle IDs. Existing custom ignore lists are preserved.
-- Right-click folders to rename or delete them. Deleting a folder keeps its clips in All. The history management menu exports the displayed text to a file or clears all unpinned items after confirmation. Exported files contain the selected history in plain text.
-- The downloadable CI build stores history locally; iCloud requires separate signing and container setup.
-
-## Validation
-
-`bash scripts/test-policies.sh` tests capture/privacy filters, retention boundaries, pin protection, exact clipboard write suppression, and paste-delivery guards using the Swift compiler.
-
-`bash scripts/test-storage.sh` additionally requires full Xcode (SwiftData macros) and exercises the actual in-memory SwiftData schema, duplicate merging, limits, cleanup, pin/folder preservation, and folder deletion. Both run in GitHub Actions before the app build and artifact upload. Direct paste still needs an on-device test with Accessibility access and the destination app's editable field focused; CI checks cannot grant that permission for a user.
-
-## Native macOS interface
-
-History uses a system toolbar and search field, a selectable sidebar with item counts, date sections, source app icons, and a compact status bar. A single click still uses an item. Select a row with the arrow keys and press Space (or use the eye button) to preview and select its complete text. Return uses the selected item; submitting a search focuses the results without pasting. Copy-only actions confirm completion in the status area.
-
-Settings opens in its own reusable window. General, History, Privacy, and Keyboard Shortcuts have focused pages, and window size and position are remembered. Folder names are edited in a sheet with validation and explicit Cancel / Save actions.
-
-For isolated visual checks, copy the CI app to a temporary bundle with a different bundle identifier, then launch that copy with `--ui-preview`. The preview uses an in-memory store and sample text; it neither records nor writes to the clipboard, and the global shortcut is not started. Use the disposable bundle to keep preview preferences separate from your installed app.
+For visual checks, copy the CI app to a disposable bundle with a distinct identifier and open it with `--ui-preview`. Preview uses an in-memory encrypted store and synthetic data, skips real Keychain authentication, and does not register a hotkey, record, or write the system clipboard. Never use the normal installed app's identity or live database for previews.

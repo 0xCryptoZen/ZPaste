@@ -2,6 +2,20 @@ import Foundation
 import CryptoKit
 import SwiftData
 
+/// Simulates a storage/process failure immediately after a durable batch save.
+final class SaveFailure: @unchecked Sendable {
+    private let mutex = NSLock()
+    private var remaining = 0
+    func arm(after saves: Int) { mutex.lock(); remaining = saves; mutex.unlock() }
+    func checkpoint() throws {
+        mutex.lock()
+        let fail = remaining == 1
+        if remaining > 0 { remaining -= 1 }
+        mutex.unlock()
+        if fail { throw VaultError.storage }
+    }
+}
+
 @main
 struct VaultStorageTests {
     static func expectFailure(_ operation: () async throws -> Void) async {
@@ -44,7 +58,7 @@ struct VaultStorageTests {
         let key = SymmetricKey(size: .bits256)
         let repository = VaultRepository(paths: paths)
         await expectFailure { _ = try await repository.page(scope: .all, search: "") }
-        let lease = VaultLease()
+        var lease = VaultLease()
         let migrated = try await repository.unlock(key: key, lease: lease)
         precondition(migrated && !FileManager.default.fileExists(atPath: paths.legacy.path))
         let summary = try await repository.summary()
@@ -61,8 +75,17 @@ struct VaultStorageTests {
         let merged = try await repository.summary()
         precondition(merged.count == 230 && merged.pinned == 1)
         try await repository.delete(summary.folders[0].id)
-        let withoutFolder = try await repository.page(scope: .all, search: "")
-        precondition(withoutFolder.clips.allSatisfy { $0.folderID == nil })
+        var position: Int? = 0
+        var checked = 0
+        while let offset = position {
+            let withoutFolder = try await repository.page(scope: .all, search: "", offset: offset)
+            precondition(withoutFolder.clips.allSatisfy { $0.folderID == nil })
+            checked += withoutFolder.clips.count
+            position = withoutFolder.nextOffset
+        }
+        precondition(checked == 230)
+        lease.invalidate(); await repository.lock(); lease = VaultLease()
+        _ = try await repository.unlock(key: key, lease: lease)
         try await repository.clean(retention: .safe)
         let cleaned = try await repository.summary()
         precondition(cleaned.count == 1 && cleaned.pinned == 1)
@@ -79,6 +102,36 @@ struct VaultStorageTests {
         let empty = try await repository.summary()
         precondition(empty.count == 0 && empty.folders.isEmpty)
         await repository.lock()
+        // A missing base file must not hide leftover plaintext migration sidecars.
+        try paths.mark(paths.pending)
+        let oldWAL = paths.sidecars(paths.legacy)[0]
+        try Data("private-body-marker orphan WAL".utf8).write(to: oldWAL)
+        _ = try await repository.unlock(key: key, lease: VaultLease())
+        precondition(!FileManager.default.fileExists(atPath: oldWAL.path))
+        precondition(!FileManager.default.fileExists(atPath: paths.pending.path))
+        await repository.lock()
+
+        // Interrupt migration after a durable folder batch; the original must survive for retry.
+        let interrupted = StorePaths(directory: root.appendingPathComponent("interrupted"), legacy: root.appendingPathComponent("retry.store"))
+        try await legacyFixture(at: interrupted.legacy)
+        let failure = SaveFailure()
+        let retry = VaultRepository(paths: interrupted, saveCheckpoint: { try failure.checkpoint() })
+        failure.arm(after: 2)
+        await expectFailure { _ = try await retry.unlock(key: key, lease: VaultLease()) }
+        precondition(FileManager.default.fileExists(atPath: interrupted.legacy.path))
+        precondition(!FileManager.default.fileExists(atPath: interrupted.committed.path))
+        _ = try await retry.unlock(key: key, lease: VaultLease())
+        let recovered = try await retry.summary()
+        precondition(recovered.count == 230 && recovered.folders[0].count == 230)
+        // Delete ALL may stop after any committed batch without orphaning a folder relationship.
+        failure.arm(after: 1)
+        await expectFailure { try await retry.clear(includePinned: true) }
+        await retry.lock()
+        _ = try await retry.unlock(key: key, lease: VaultLease())
+        let partial = try await retry.summary()
+        precondition(partial.count == 130 && partial.folders.count == 1 && partial.folders[0].count == 130)
+        try await retry.clear(includePinned: true)
+        await retry.lock()
 
         // An unrecognized old database must remain byte-for-byte unchanged, with no commit marker.
         let invalid = StorePaths(directory: root.appendingPathComponent("invalid"), legacy: root.appendingPathComponent("unknown.store"))

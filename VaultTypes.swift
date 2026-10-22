@@ -8,7 +8,7 @@ enum VaultLimits {
     static func acceptsNewText(_ text: String) -> Bool { text.utf8.count <= textBytes }
 }
 
-enum RecordKind: String, Codable, Sendable { case clip, folder }
+enum RecordKind: String, Codable, Sendable { case clip, folder, header }
 
 struct RecordMetadata: Codable, Equatable, Sendable {
     var id: UUID

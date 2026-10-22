@@ -4,7 +4,12 @@ import LocalAuthentication
 import Security
 
 /// Authentication is enforced by the Keychain ACL, including for fresh installations.
-final class VaultKeychain: @unchecked Sendable {
+protocol VaultKeyProviding: Sendable {
+    func load(createIfMissing: Bool, reason: String) throws -> SymmetricKey
+    func cancel()
+}
+
+final class VaultKeychain: VaultKeyProviding, @unchecked Sendable {
     private let mutex = NSLock()
     private var context: LAContext?
     private let service = (Bundle.main.bundleIdentifier ?? "com.example.zpaste") + ".vault.v1"
@@ -18,7 +23,10 @@ final class VaultKeychain: @unchecked Sendable {
         authentication.localizedReason = reason
         authentication.touchIDAuthenticationAllowableReuseDuration = 0
         mutex.lock(); context = authentication; mutex.unlock()
-        defer { authentication.invalidate(); mutex.lock(); context = nil; mutex.unlock() }
+        defer {
+            authentication.invalidate()
+            mutex.lock(); if context === authentication { context = nil }; mutex.unlock()
+        }
         let identity: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

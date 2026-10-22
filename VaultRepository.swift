@@ -8,10 +8,19 @@ actor VaultRepository {
     private var context: ModelContext?
     private var key: SymmetricKey?
     private var lease: VaultLease?
+    private var payloadByteCount: Int?
+    private var duplicateKey = SymmetricKey(size: .bits256)
+    private var duplicates: [Data: (id: UUID, date: Date)] = [:]
+    private var fingerprints: [UUID: Data] = [:]
+    private var indexComplete = true
+    private static let headerID = UUID(uuidString: "861CB4AD-9C39-4E4F-9087-7552646E1D12")!
     let paths: StorePaths
     private let memoryOnly: Bool
+    private let saveCheckpoint: (@Sendable () throws -> Void)?
 
-    init(paths: StorePaths, memoryOnly: Bool = false) { self.paths = paths; self.memoryOnly = memoryOnly }
+    init(paths: StorePaths, memoryOnly: Bool = false, saveCheckpoint: (@Sendable () throws -> Void)? = nil) {
+        self.paths = paths; self.memoryOnly = memoryOnly; self.saveCheckpoint = saveCheckpoint
+    }
     func requiresExistingKey() -> Bool { !memoryOnly && paths.requiresExistingKey }
 
     func unlock(key: SymmetricKey, lease: VaultLease) throws -> Bool {
@@ -23,6 +32,7 @@ actor VaultRepository {
                 container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)])
                 context = ModelContext(container!)
                 context?.autosaveEnabled = false
+                try createHeader()
                 return false
             }
             try paths.prepare()
@@ -38,6 +48,7 @@ actor VaultRepository {
                 guard fm.fileExists(atPath: paths.database.path) else { throw VaultError.storage }
             }
             try openStore()
+            if !isCommitted { try createHeader() }
             let hadLegacy = !isCommitted && fm.fileExists(atPath: paths.legacy.path)
             if hadLegacy { try migrateLegacy() }
             try validateAll()
@@ -51,7 +62,7 @@ actor VaultRepository {
                 try paths.mark(paths.committed)
             }
             if fm.fileExists(atPath: paths.pending.path) {
-                if fm.fileExists(atPath: paths.legacy.path) { try paths.removeDatabase(paths.legacy) }
+                try paths.removeDatabase(paths.legacy)
                 try fm.removeItem(at: paths.pending)
             }
             return hadLegacy
@@ -61,7 +72,11 @@ actor VaultRepository {
         }
     }
 
-    func lock() { key = nil; lease = nil; context = nil; container = nil }
+    func lock(lease expected: VaultLease? = nil) {
+        if let expected, lease !== expected { return }
+        key = nil; lease = nil; context = nil; container = nil; payloadByteCount = nil
+        duplicates.removeAll(); fingerprints.removeAll(); duplicateKey = SymmetricKey(size: .bits256); indexComplete = true
+    }
 
     private func openStore() throws {
         let schema = Schema([VaultRecord.self])
@@ -87,11 +102,13 @@ actor VaultRepository {
     func write(_ metadata: RecordMetadata, payload: RecordPayload, existing: VaultRecord? = nil) throws {
         let (context, key) = try access()
         let sealed = try VaultCipher.seal(payload, metadata: metadata, key: key)
+        if let bytes = payloadByteCount { payloadByteCount = bytes - (existing?.sealedPayload.count ?? 0) + sealed.count }
         if let existing {
             existing.createdAt = metadata.createdAt; existing.isPinned = metadata.isPinned
             existing.pinRank = metadata.isPinned ? 1 : 0
             existing.folderID = metadata.folderID; existing.sealedPayload = sealed
         } else { context.insert(VaultRecord(metadata: metadata, sealedPayload: sealed)) }
+        if metadata.kind == .clip { index(metadata, text: payload.text) }
     }
 
     func save() throws {
@@ -99,6 +116,7 @@ actor VaultRepository {
         do {
             try context.save()
             if !memoryOnly { try paths.protectFiles() }
+            try saveCheckpoint?()
         } catch { context.rollback(); throw VaultError.storage }
     }
 
@@ -128,17 +146,29 @@ actor VaultRepository {
 
     private func validateAll() throws {
         let (context, _) = try access()
+        payloadByteCount = 0; duplicates.removeAll(); fingerprints.removeAll(); indexComplete = true
+        var headerCount = 0
+        try batches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "header" })) { record in
+            guard record.id == Self.headerID, !record.isPinned, record.folderID == nil,
+                  try payload(record) == RecordPayload(text: "ZPaste encrypted history v1", source: nil) else { throw VaultError.corrupt }
+            payloadByteCount? += record.sealedPayload.count
+            headerCount += 1
+        }
+        guard headerCount == 1 else { throw VaultError.corrupt }
         var folders = Set<UUID>()
         try batches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "folder" })) { record in
             _ = try payload(record)
+            payloadByteCount? += record.sealedPayload.count
             guard record.folderID == nil, !record.isPinned else { throw VaultError.corrupt }
             folders.insert(record.id)
         }
         try batches(request()) { record in
-            _ = try payload(record)
+            let value = try payload(record)
+            payloadByteCount? += record.sealedPayload.count
+            index(try record.metadata(), text: value.text)
             if let folder = record.folderID, !folders.contains(folder) { throw VaultError.corrupt }
         }
-        let known = try context.fetchCount(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "clip" || $0.kind == "folder" }))
+        let known = try context.fetchCount(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "clip" || $0.kind == "folder" || $0.kind == "header" }))
         guard known == (try context.fetchCount(FetchDescriptor<VaultRecord>())) else { throw VaultError.corrupt }
     }
 
@@ -183,11 +213,19 @@ actor VaultRepository {
         var result = VaultSummary()
         result.count = try context.fetchCount(request())
         result.pinned = try context.fetchCount(request(scope: .pinned))
-        try batches(FetchDescriptor<VaultRecord>()) { result.payloadBytes += $0.sealedPayload.count }
+        if let payloadByteCount { result.payloadBytes = payloadByteCount }
+        else {
+            try batches(FetchDescriptor<VaultRecord>()) { result.payloadBytes += $0.sealedPayload.count }
+            payloadByteCount = result.payloadBytes
+        }
+        var folderBytes = 0
         try batches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "folder" }, sortBy: [SortDescriptor(\VaultRecord.createdAt)])) { record in
             let value = try payload(record)
             let count = try context.fetchCount(request(scope: .folder(record.id)))
-            result.folders.append(FolderItem(id: record.id, name: value.text, count: count))
+            let displayed = String(value.text.prefix(256))
+            folderBytes += displayed.utf8.count
+            guard folderBytes <= VaultLimits.payloadBytes / 10 else { throw VaultError.capacity }
+            result.folders.append(FolderItem(id: record.id, name: displayed, count: count))
         }
         return result
     }
@@ -204,5 +242,52 @@ actor VaultRepository {
         let record = try find(id)
         guard record.kind == "clip" else { throw VaultError.missingRecord }
         return try payload(record).text
+    }
+
+    private func fingerprint(_ text: String) -> Data {
+        Data(HMAC<SHA256>.authenticationCode(for: Data(text.utf8), using: duplicateKey))
+    }
+
+    private func index(_ metadata: RecordMetadata, text: String) {
+        let digest = fingerprint(text)
+        if let previous = fingerprints[metadata.id], previous != digest, duplicates[previous]?.id == metadata.id { duplicates[previous] = nil }
+        guard fingerprints[metadata.id] != nil || fingerprints.count < 5_000 else { indexComplete = false; return }
+        fingerprints[metadata.id] = digest
+        if duplicates[digest] == nil || duplicates[digest]!.date <= metadata.createdAt { duplicates[digest] = (metadata.id, metadata.createdAt) }
+    }
+
+    func duplicate(_ text: String) throws -> VaultRecord? {
+        let digest = fingerprint(text)
+        if let match = duplicates[digest] {
+            let record = try find(match.id)
+            // The digest only selects a candidate; authenticated text must still match exactly.
+            if try payload(record).text == text { return record }
+        }
+        // A duplicate may remain after the indexed newest copy was deleted.
+        for (id, stored) in fingerprints where stored == digest {
+            let record = try find(id)
+            if try payload(record).text == text { return record }
+        }
+        if !indexComplete {
+            var match: VaultRecord?
+            try batches(request()) { record in
+                if match == nil, try payload(record).text == text { match = record }
+            }
+            return match
+        }
+        return nil
+    }
+
+    func remove(_ record: VaultRecord) throws {
+        let (context, _) = try access()
+        if let bytes = payloadByteCount { payloadByteCount = bytes - record.sealedPayload.count }
+        if let digest = fingerprints.removeValue(forKey: record.id), duplicates[digest]?.id == record.id { duplicates[digest] = nil }
+        context.delete(record)
+    }
+
+    private func createHeader() throws {
+        try write(RecordMetadata(id: Self.headerID, kind: .header, createdAt: Date(timeIntervalSince1970: 0), isPinned: false, folderID: nil),
+                  payload: RecordPayload(text: "ZPaste encrypted history v1", source: nil))
+        try save()
     }
 }

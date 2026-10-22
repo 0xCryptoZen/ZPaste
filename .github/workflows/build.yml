@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -36,6 +38,12 @@ jobs:
       - name: Test encrypted storage and migration
         run: bash scripts/test-vault-storage.sh
 
+      - name: Test vault session cancellation
+        run: bash scripts/test-vault-session.sh
+
+      - name: Benchmark encrypted queries
+        run: bash scripts/benchmark-vault.sh | tee "$RUNNER_TEMP/ZPaste-benchmarks.txt"
+
       - name: Build (no signing)
         run: |
           xcodebuild -project ZPaste.xcodeproj \
@@ -52,10 +60,35 @@ jobs:
             "$RUNNER_TEMP/ZPaste-build/Build/Products/Release/ZPaste.app" \
             "$RUNNER_TEMP/ZPaste-macOS.zip"
 
+      - name: Compare Release package sizes to baseline
+        run: |
+          mkdir "$RUNNER_TEMP/ZPaste-baseline"
+          git archive ae99a1fbc5ebe5f40b2c324ef7c9f39c7647e423 | tar -x -C "$RUNNER_TEMP/ZPaste-baseline"
+          (cd "$RUNNER_TEMP/ZPaste-baseline" && xcodegen generate)
+          xcodebuild -project "$RUNNER_TEMP/ZPaste-baseline/ZPaste.xcodeproj" \
+            -scheme ZPaste -configuration Release -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/ZPaste-baseline-build" CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/ZPaste-baseline-build.log" 2>&1
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/ZPaste-baseline-build/Build/Products/Release/ZPaste.app" "$RUNNER_TEMP/ZPaste-baseline.zip"
+          {
+            sw_vers
+            sysctl -n hw.model
+            du -sk "$RUNNER_TEMP/ZPaste-baseline-build/Build/Products/Release/ZPaste.app" "$RUNNER_TEMP/ZPaste-build/Build/Products/Release/ZPaste.app"
+            stat -f '%N %z bytes' "$RUNNER_TEMP/ZPaste-baseline.zip" "$RUNNER_TEMP/ZPaste-macOS.zip"
+          } >> "$RUNNER_TEMP/ZPaste-benchmarks.txt"
+
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
           name: ZPaste-macOS
           path: ${{ runner.temp }}/ZPaste-macOS.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZPaste-benchmarks
+          path: ${{ runner.temp }}/ZPaste-benchmarks.txt
           if-no-files-found: error
           retention-days: 14
