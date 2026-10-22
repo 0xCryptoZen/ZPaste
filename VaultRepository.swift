@@ -88,6 +88,7 @@ actor VaultRepository {
 
     func access() throws -> (ModelContext, SymmetricKey) {
         try lease?.check()
+        if let expected = VaultAccess.lease, lease !== expected { throw VaultError.locked }
         guard let context, let key, lease != nil else { throw VaultError.locked }
         return (context, key)
     }
@@ -189,15 +190,17 @@ actor VaultRepository {
                 try checkLease()
                 let value = try payload(record)
                 guard search.isEmpty || value.text.localizedCaseInsensitiveContains(search) else { continue }
-                let oversized = value.text.utf8.count > byteLimit
-                let displayed = oversized ? String(value.text.prefix(2_048)) : value.text
-                guard bytes + displayed.utf8.count <= byteLimit else {
+                let source = value.source.map { VaultLimits.displayPrefix($0, bytes: 256) }
+                let oversized = value.text.utf8.count > byteLimit - (source?.utf8.count ?? 0)
+                let displayed = oversized ? VaultLimits.displayPrefix(value.text, bytes: min(2_048, max(byteLimit - 256, 0))) : value.text
+                let size = displayed.utf8.count + (source?.utf8.count ?? 0)
+                guard bytes + size <= byteLimit else {
                     page.nextOffset = (descriptor.fetchOffset ?? 0) + index
                     return page
                 }
-                bytes += displayed.utf8.count
+                bytes += size
                 page.clips.append(ClipItem(id: record.id, text: displayed, createdAt: record.createdAt,
-                                          isPinned: record.isPinned, sourceAppBundleID: value.source, folderID: record.folderID,
+                                          isPinned: record.isPinned, sourceAppBundleID: source, folderID: record.folderID,
                                           isPreviewOnly: oversized))
                 if page.clips.count == limit {
                     page.nextOffset = (descriptor.fetchOffset ?? 0) + index + 1
@@ -222,7 +225,7 @@ actor VaultRepository {
         try batches(FetchDescriptor<VaultRecord>(predicate: #Predicate { $0.kind == "folder" }, sortBy: [SortDescriptor(\VaultRecord.createdAt)])) { record in
             let value = try payload(record)
             let count = try context.fetchCount(request(scope: .folder(record.id)))
-            let displayed = String(value.text.prefix(256))
+            let displayed = VaultLimits.displayPrefix(value.text, bytes: 256)
             folderBytes += displayed.utf8.count
             guard folderBytes <= VaultLimits.payloadBytes / 10 else { throw VaultError.capacity }
             result.folders.append(FolderItem(id: record.id, name: displayed, count: count))

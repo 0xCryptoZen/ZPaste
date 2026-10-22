@@ -6,6 +6,17 @@ enum VaultLimits {
     static let pinnedItems = 100
     static let pageSize = 100
     static func acceptsNewText(_ text: String) -> Bool { text.utf8.count <= textBytes }
+
+    static func displayPrefix(_ text: String, bytes limit: Int) -> String {
+        if text.utf8.count <= limit { return text }
+        var result = "", used = 0
+        for scalar in text.unicodeScalars {
+            let size = scalar.value < 0x80 ? 1 : (scalar.value < 0x800 ? 2 : (scalar.value < 0x10000 ? 3 : 4))
+            if used + size > limit { break }
+            result.unicodeScalars.append(scalar); used += size
+        }
+        return result
+    }
 }
 
 enum RecordKind: String, Codable, Sendable { case clip, folder, header }
@@ -88,4 +99,9 @@ final class VaultLease: @unchecked Sendable {
         lock.lock(); let allowed = valid; lock.unlock()
         guard allowed, !Task.isCancelled else { throw VaultError.locked }
     }
+}
+
+/// Carries the initiating session across actor hops; an old operation cannot borrow a new unlock.
+enum VaultAccess {
+    @TaskLocal static var lease: VaultLease?
 }

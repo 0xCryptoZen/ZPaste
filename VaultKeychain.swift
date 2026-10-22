@@ -5,7 +5,7 @@ import Security
 
 /// Authentication is enforced by the Keychain ACL, including for fresh installations.
 protocol VaultKeyProviding: Sendable {
-    func load(createIfMissing: Bool, reason: String) throws -> SymmetricKey
+    func load(createIfMissing: Bool, reason: String, lease: VaultLease) throws -> SymmetricKey
     func cancel()
 }
 
@@ -18,11 +18,14 @@ final class VaultKeychain: VaultKeyProviding, @unchecked Sendable {
         mutex.lock(); context?.invalidate(); context = nil; mutex.unlock()
     }
 
-    func load(createIfMissing: Bool, reason: String) throws -> SymmetricKey {
+    func load(createIfMissing: Bool, reason: String, lease: VaultLease) throws -> SymmetricKey {
         let authentication = LAContext()
         authentication.localizedReason = reason
         authentication.touchIDAuthenticationAllowableReuseDuration = 0
-        mutex.lock(); context = authentication; mutex.unlock()
+        // Register and check cancellation atomically with respect to cancel().
+        mutex.lock()
+        do { try lease.check(); context = authentication; mutex.unlock() }
+        catch { mutex.unlock(); authentication.invalidate(); throw error }
         defer {
             authentication.invalidate()
             mutex.lock(); if context === authentication { context = nil }; mutex.unlock()
@@ -41,6 +44,7 @@ final class VaultKeychain: VaultKeyProviding, @unchecked Sendable {
         var result: CFTypeRef?
         var status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound {
+            try lease.check()
             guard createIfMissing else { throw VaultError.missingKey }
             var error: Unmanaged<CFError>?
             guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,

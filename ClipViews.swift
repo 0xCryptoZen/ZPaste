@@ -10,8 +10,15 @@ enum SourceApplication {
         guard let bundleID else { return Info(name: "Unknown App", icon: nil) }
         if let cached = cache[bundleID] { return cached }
         let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-        let info = Info(name: url?.deletingPathExtension().lastPathComponent ?? bundleID,
-                        icon: url.map { NSWorkspace.shared.icon(forFile: $0.path) })
+        let icon: NSImage? = url.map {
+            let original = NSWorkspace.shared.icon(forFile: $0.path)
+            let small = NSImage(size: NSSize(width: 32, height: 32))
+            small.lockFocus()
+            original.draw(in: NSRect(x: 0, y: 0, width: 32, height: 32))
+            small.unlockFocus()
+            return small
+        }
+        let info = Info(name: url?.deletingPathExtension().lastPathComponent ?? bundleID, icon: icon)
         if cache.count >= 64 { cache.removeAll() }
         cache[bundleID] = info
         return info

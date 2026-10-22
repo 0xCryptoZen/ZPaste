@@ -15,7 +15,8 @@ final class TestKeyProvider: VaultKeyProviding, @unchecked Sendable {
         mutex.lock(); shouldFail = fail; self.block = block; entered = false; mutex.unlock()
     }
     func cancel() { proceed.signal() }
-    func load(createIfMissing: Bool, reason: String) throws -> SymmetricKey {
+    func load(createIfMissing: Bool, reason: String, lease: VaultLease) throws -> SymmetricKey {
+        try lease.check()
         mutex.lock(); let failure = shouldFail; let blocked = block; entered = true; mutex.unlock()
         if blocked { _ = proceed.wait(timeout: .now() + 5) }
         if failure { throw VaultError.keychain(-1) }
@@ -42,6 +43,9 @@ struct VaultSessionTests {
         let provider = TestKeyProvider()
         let session = VaultSession(repository: repository, keyProvider: provider, captureAllowed: false, preview: false)
         precondition(!session.isUnlocked)
+        session.unlock(); session.lock()
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(!provider.hasEntered, "Cancelled unlock launched a late authentication request")
         provider.configure(fail: true)
         session.unlock()
         await wait { session.state == .failed }
@@ -52,10 +56,24 @@ struct VaultSessionTests {
         await session.capture("session-private-marker", source: "test")
         await wait { session.summary.count == 1 }
         precondition(session.summary.count == 1 && session.recent.count == 1)
+        let pendingMutation = Task {
+            await session.mutate { repository in
+                try await Task.sleep(for: .milliseconds(100))
+                try await repository.record(text: "stale mutation", source: "test", merge: false, retention: .safe)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(20))
         session.lock()
         precondition(!session.isUnlocked && session.recent.isEmpty && session.summary.folders.isEmpty)
         await session.capture("copy after lock", source: "test")
         precondition(session.recent.isEmpty)
+        session.unlock()
+        await wait { session.isUnlocked }
+        let applied = await pendingMutation.value
+        precondition(!applied)
+        let newSummary = try await repository.summary()
+        precondition(newSummary.count == 0, "An old task borrowed the new unlock's key")
+        session.lock()
 
         // A key read that finishes after cancellation cannot unlock or publish data.
         provider.configure(block: true)
@@ -74,6 +92,10 @@ struct VaultSessionTests {
         _ = try await repository.unlock(key: provider.key, lease: newLease)
         await repository.lock(lease: oldLease)
         _ = try await repository.summary()
+        do {
+            _ = try await VaultAccess.$lease.withValue(oldLease) { try await repository.summary() }
+            preconditionFailure("Old operations must not borrow a new session")
+        } catch VaultError.locked { }
         newLease.invalidate()
         session.stop()
         print("Vault session tests passed: authentication denial, unlock, memory clearing, post-lock capture rejection, late authentication, and old-lease isolation")

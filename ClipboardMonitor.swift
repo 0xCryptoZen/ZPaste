@@ -14,6 +14,7 @@ final class ClipboardMonitor {
     private var activationObserver: NSObjectProtocol?
     private var timer: Timer?
     private var captureTask: Task<Void, Never>?
+    private var runID = UUID()
     var isRunning: Bool { timer != nil }
 
     init(session: VaultSession) { self.session = session }
@@ -54,6 +55,7 @@ final class ClipboardMonitor {
     }
 
     func stop() {
+        runID = UUID()
         timer?.invalidate(); timer = nil
         captureTask?.cancel(); captureTask = nil
         if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
@@ -80,9 +82,10 @@ final class ClipboardMonitor {
               pasteboard.changeCount == count,
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == source,
               !sourceChanged, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let epoch = runID
         captureTask = Task { [weak self, weak session] in
             await session?.capture(text, source: source)
-            self?.captureTask = nil
+            if self?.runID == epoch { self?.captureTask = nil }
         }
     }
 }

@@ -16,7 +16,7 @@ final class VaultSession: ObservableObject {
     private var generation = UUID()
     private var operation: Task<Void, Never>?
     private var maintenance: Task<Void, Never>?
-    private var refreshing = false
+    private var refreshOwner: UUID?
     private var needsRefresh = false
     private var deleting = false
     private let keychain: any VaultKeyProviding
@@ -25,6 +25,7 @@ final class VaultSession: ObservableObject {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private lazy var monitor = ClipboardMonitor(session: self)
     var isUnlocked: Bool { state == .ready }
+    var activeLease: VaultLease? { isUnlocked ? lease : nil }
     var retention: RetentionSettings {
         RetentionSettings(days: UserDefaults.standard.integer(forKey: "retentionDays"),
                           limit: UserDefaults.standard.integer(forKey: "historyLimit"),
@@ -72,11 +73,13 @@ final class VaultSession: ObservableObject {
         self.lease = lease
         operation = Task { [weak self, keychain] in
             do {
+                try lease.check()
                 let existing = await repository.requiresExistingKey()
+                try lease.check()
                 let key: SymmetricKey
                 if self?.preview == true { key = SymmetricKey(size: .bits256) }
                 else {
-                    key = try await Task.detached { try keychain.load(createIfMissing: !existing, reason: "Unlock your encrypted clipboard history") }.value
+                    key = try await Task.detached { try keychain.load(createIfMissing: !existing, reason: "Unlock your encrypted clipboard history", lease: lease) }.value
                 }
                 try lease.check()
                 let migrated = try await repository.unlock(key: key, lease: lease)
@@ -131,10 +134,14 @@ final class VaultSession: ObservableObject {
     }
 
     func capture(_ text: String, source: String) async {
-        guard isUnlocked, let repository else { return }
+        guard isUnlocked, let repository, let lease else { return }
         let epoch = generation
         do {
-            try await repository.record(text: text, source: source, merge: UserDefaults.standard.bool(forKey: "mergeDuplicates"), retention: retention)
+            let merge = UserDefaults.standard.bool(forKey: "mergeDuplicates")
+            let policy = retention
+            try await VaultAccess.$lease.withValue(lease) {
+                try await repository.record(text: text, source: source, merge: merge, retention: policy)
+            }
             guard epoch == generation, isUnlocked else { return }
             await refresh()
         } catch VaultError.tooLarge { if epoch == generation { AppStatus.shared.errorMessage = VaultError.tooLarge.localizedDescription } }
@@ -147,16 +154,20 @@ final class VaultSession: ObservableObject {
     }
 
     func refresh() async {
-        guard isUnlocked, let repository else { return }
-        if refreshing { needsRefresh = true; return }
-        refreshing = true
-        defer { refreshing = false }
+        guard isUnlocked, let repository, let lease else { return }
+        let owner = generation
+        if refreshOwner == owner { needsRefresh = true; return }
+        refreshOwner = owner
+        defer { if refreshOwner == owner { refreshOwner = nil } }
         repeat {
             needsRefresh = false
             let epoch = generation
             do {
-                let summary = try await repository.summary()
-                let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.payloadBytes / 5, recent: true)
+                let (summary, recent) = try await VaultAccess.$lease.withValue(lease) {
+                    let summary = try await repository.summary()
+                    let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.payloadBytes / 5, recent: true)
+                    return (summary, recent)
+                }
                 guard epoch == generation, isUnlocked else { return }
                 self.summary = summary; self.recent = recent.clips
                 revision = UUID()
@@ -165,17 +176,17 @@ final class VaultSession: ObservableObject {
     }
 
     func mutate(_ action: @escaping @Sendable (VaultRepository) async throws -> Void) async -> Bool {
-        guard isUnlocked, let repository else { return false }
+        guard isUnlocked, let repository, let lease else { return false }
         let epoch = generation
         do {
-            try await action(repository)
+            try await VaultAccess.$lease.withValue(lease) { try await action(repository) }
             guard epoch == generation, isUnlocked else { return false }
             await refresh()
             return isUnlocked
-        } catch VaultError.pinLimit { AppStatus.shared.errorMessage = VaultError.pinLimit.localizedDescription }
-        catch VaultError.tooLarge { AppStatus.shared.errorMessage = VaultError.tooLarge.localizedDescription }
-        catch VaultError.capacity { AppStatus.shared.errorMessage = VaultError.capacity.localizedDescription }
-        catch VaultError.missingRecord { AppStatus.shared.errorMessage = VaultError.missingRecord.localizedDescription }
+        } catch VaultError.pinLimit { if epoch == generation { AppStatus.shared.errorMessage = VaultError.pinLimit.localizedDescription } }
+        catch VaultError.tooLarge { if epoch == generation { AppStatus.shared.errorMessage = VaultError.tooLarge.localizedDescription } }
+        catch VaultError.capacity { if epoch == generation { AppStatus.shared.errorMessage = VaultError.capacity.localizedDescription } }
+        catch VaultError.missingRecord { if epoch == generation { AppStatus.shared.errorMessage = VaultError.missingRecord.localizedDescription } }
         catch { if epoch == generation { fail(error) } }
         return false
     }
@@ -187,7 +198,7 @@ final class VaultSession: ObservableObject {
     }
 
     func deleteEverything() {
-        guard isUnlocked, !deleting, let repository else { return }
+        guard isUnlocked, !deleting, let repository, let lease else { return }
         deleting = true
         state = .deleting
         monitor.stop()
@@ -195,9 +206,10 @@ final class VaultSession: ObservableObject {
         let epoch = generation
         operation = Task { [weak self, keychain] in
             do {
-                _ = try await Task.detached { try keychain.load(createIfMissing: false, reason: "Delete all clipboard history, including pins and folders") }.value
+                try lease.check()
+                _ = try await Task.detached { try keychain.load(createIfMissing: false, reason: "Delete all clipboard history, including pins and folders", lease: lease) }.value
                 guard let self, epoch == self.generation, self.state == .deleting else { return }
-                try await repository.clear(includePinned: true)
+                try await VaultAccess.$lease.withValue(lease) { try await repository.clear(includePinned: true) }
                 guard epoch == self.generation else { return }
                 self.lock()
             } catch { if let self, epoch == self.generation { self.fail(error) } }
@@ -207,14 +219,16 @@ final class VaultSession: ObservableObject {
     func clearError() { errorMessage = nil; AppStatus.shared.errorMessage = nil }
 
     func use(_ id: UUID, copyOnly: Bool = false, forcePaste: Bool = false) {
-        guard isUnlocked, let repository else { return }
+        guard isUnlocked, let repository, let lease else { return }
         let epoch = generation
         Task {
             do {
-                let text = try await repository.text(id)
+                let text = try await VaultAccess.$lease.withValue(lease) { try await repository.text(id) }
                 guard epoch == generation, isUnlocked, !Task.isCancelled else { return }
                 if copyOnly { PasteController.shared.copy(text) }
                 else { PasteController.shared.select(text, forcePaste: forcePaste) }
+            } catch VaultError.missingRecord {
+                if epoch == generation { AppStatus.shared.errorMessage = VaultError.missingRecord.localizedDescription }
             } catch { if epoch == generation { fail(error) } }
         }
     }

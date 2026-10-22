@@ -5,6 +5,10 @@ on:
     branches: [main, 'codex/**']
   pull_request:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-15
@@ -36,12 +40,15 @@ jobs:
         run: bash scripts/test-cipher.sh
 
       - name: Test encrypted storage and migration
+        timeout-minutes: 3
         run: bash scripts/test-vault-storage.sh
 
       - name: Test vault session cancellation
+        timeout-minutes: 3
         run: bash scripts/test-vault-session.sh
 
       - name: Benchmark encrypted queries
+        timeout-minutes: 5
         run: bash scripts/benchmark-vault.sh | tee "$RUNNER_TEMP/ZPaste-benchmarks.txt"
 
       - name: Build (no signing)

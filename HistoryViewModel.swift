@@ -11,7 +11,7 @@ final class HistoryViewModel: ObservableObject {
 
     func load(scope: HistoryScope, search: String, offset: Int = 0, limit: Int = 100, byteLimit: Int = VaultLimits.payloadBytes / 2) async {
         let vault = VaultSession.shared
-        guard vault.isUnlocked, let repository = vault.repository else { clear(); return }
+        guard vault.isUnlocked, let repository = vault.repository, let lease = vault.activeLease else { clear(); return }
         let query = UUID()
         queryID = query
         let revision = vault.revision
@@ -19,7 +19,9 @@ final class HistoryViewModel: ObservableObject {
         defer { if queryID == query { loading = false } }
         do {
             if !search.isEmpty { try await Task.sleep(for: .milliseconds(150)) }
-            let page = try await repository.page(scope: scope, search: search, offset: offset, limit: limit, byteLimit: byteLimit)
+            let page = try await VaultAccess.$lease.withValue(lease) {
+                try await repository.page(scope: scope, search: search, offset: offset, limit: limit, byteLimit: byteLimit)
+            }
             try Task.checkCancellation()
             guard queryID == query, vault.isUnlocked, revision == vault.revision else { return }
             self.page = page

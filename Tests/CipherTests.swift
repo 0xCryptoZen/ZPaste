@@ -33,6 +33,9 @@ struct CipherTests {
         rejects { _ = try VaultCipher.open(Data(), metadata: metadata, key: key) }
         precondition(VaultLimits.acceptsNewText(String(repeating: "a", count: 256 * 1024)))
         precondition(!VaultLimits.acceptsNewText(String(repeating: "密", count: 100_000)))
+        let combining = "a" + String(repeating: "\u{0301}", count: 5_000)
+        precondition(VaultLimits.displayPrefix(combining, bytes: 256).utf8.count <= 256)
+        precondition(VaultLimits.displayPrefix("秘密🙂", bytes: 7) == "秘密")
         print("Cipher tests passed: round trip, fresh nonces, wrong keys, all authenticated metadata, corruption, UTF-8 limits")
     }
 }
