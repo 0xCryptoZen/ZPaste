@@ -121,4 +121,4 @@ History uses a system toolbar and search field, a selectable sidebar with item c
 
 Settings opens in its own reusable window. General, History, Privacy, and Keyboard Shortcuts have focused pages, and window size and position are remembered. Folder names are edited in a sheet with validation and explicit Cancel / Save actions.
 
-For isolated visual checks, copy the CI app to a temporary bundle with a different bundle identifier, then launch that copy with `--ui-preview`. The preview uses an in-memory store and sample text; clipboard monitoring and the global shortcut are not started. Use the disposable bundle to keep preview preferences separate from your installed app.
+For isolated visual checks, copy the CI app to a temporary bundle with a different bundle identifier, then launch that copy with `--ui-preview`. The preview uses an in-memory store and sample text; it neither records nor writes to the clipboard, and the global shortcut is not started. Use the disposable bundle to keep preview preferences separate from your installed app.

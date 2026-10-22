@@ -40,12 +40,14 @@ final class PasteController: ObservableObject {
     }
 
     func copy(_ text: String) {
+        guard !UIPreviewData.enabled else { AppStatus.shared.copied(); return }
         delivery?.cancel()
         if ClipboardMonitor.write(text) { AppStatus.shared.copied() }
         else { showError("Could not write to the clipboard.") }
     }
 
     func select(_ text: String, forcePaste: Bool = false) {
+        guard !UIPreviewData.enabled else { AppStatus.shared.copied(); return }
         delivery?.cancel()
         guard ClipboardMonitor.write(text) else {
             showError("Could not write to the clipboard.")
