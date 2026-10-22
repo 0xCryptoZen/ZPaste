@@ -201,9 +201,10 @@ actor VaultRepository {
         descriptor.fetchLimit = search.isEmpty ? min(limit, VaultLimits.pageSize) : (smallStore ? 1_000 : VaultLimits.pageSize)
         descriptor.includePendingChanges = false
         descriptor.fetchOffset = offset
+        let available = try context.fetchCount(FetchDescriptor<VaultRecord>(predicate: descriptor.predicate))
         var page = VaultPage()
         var bytes = 0
-        while true {
+        while (descriptor.fetchOffset ?? 0) < available {
             try checkLease()
             let records = try context.fetch(descriptor)
             if records.isEmpty { return page }
@@ -224,12 +225,14 @@ actor VaultRepository {
                                           isPinned: record.isPinned, sourceAppBundleID: source, folderID: record.folderID,
                                           isPreviewOnly: oversized))
                 if page.clips.count == limit {
-                    page.nextOffset = (descriptor.fetchOffset ?? 0) + index + 1
+                    let next = (descriptor.fetchOffset ?? 0) + index + 1
+                    page.nextOffset = next < available ? next : nil
                     return page
                 }
             }
             descriptor.fetchOffset = (descriptor.fetchOffset ?? 0) + records.count
         }
+        return page
     }
 
     func summary() throws -> VaultSummary {
