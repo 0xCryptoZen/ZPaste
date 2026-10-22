@@ -114,3 +114,11 @@ This project is for learning and research only and is an independent implementat
 `bash scripts/test-policies.sh` tests capture/privacy filters, retention boundaries, pin protection, exact clipboard write suppression, and paste-delivery guards using the Swift compiler.
 
 `bash scripts/test-storage.sh` additionally requires full Xcode (SwiftData macros) and exercises the actual in-memory SwiftData schema, duplicate merging, limits, cleanup, pin/folder preservation, and folder deletion. Both run in GitHub Actions before the app build and artifact upload. Direct paste still needs an on-device test with Accessibility access and the destination app's editable field focused; CI checks cannot grant that permission for a user.
+
+## Native macOS interface
+
+History uses a system toolbar and search field, a selectable sidebar with item counts, date sections, source app icons, and a compact status bar. A single click still uses an item. Select a row with the arrow keys and press Space (or use the eye button) to preview and select its complete text. Return uses the selected item; submitting a search focuses the results without pasting. Copy-only actions confirm completion in the status area.
+
+Settings opens in its own reusable window. General, History, Privacy, and Keyboard Shortcuts have focused pages, and window size and position are remembered. Folder names are edited in a sheet with validation and explicit Cancel / Save actions.
+
+For isolated visual checks, copy the CI app to a temporary bundle with a different bundle identifier, then launch that copy with `--ui-preview`. The preview uses an in-memory store and sample text; clipboard monitoring and the global shortcut are not started. Use the disposable bundle to keep preview preferences separate from your installed app.

@@ -29,4 +29,15 @@ enum AppPreferences {
 final class AppStatus: ObservableObject {
     static let shared = AppStatus()
     @Published var errorMessage: String?
+    @Published private(set) var feedback: String?
+    private var feedbackTask: Task<Void, Never>?
+
+    func copied() {
+        feedbackTask?.cancel()
+        feedback = "Copied to clipboard"
+        feedbackTask = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            feedback = nil
+        }
+    }
 }

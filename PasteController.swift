@@ -41,7 +41,8 @@ final class PasteController: ObservableObject {
 
     func copy(_ text: String) {
         delivery?.cancel()
-        if !ClipboardMonitor.write(text) { showError("Could not write to the clipboard.") }
+        if ClipboardMonitor.write(text) { AppStatus.shared.copied() }
+        else { showError("Could not write to the clipboard.") }
     }
 
     func select(_ text: String, forcePaste: Bool = false) {
@@ -50,7 +51,10 @@ final class PasteController: ObservableObject {
             showError("Could not write to the clipboard.")
             return
         }
-        guard forcePaste || UserDefaults.standard.bool(forKey: "pasteOnClick") else { return }
+        guard forcePaste || UserDefaults.standard.bool(forKey: "pasteOnClick") else {
+            AppStatus.shared.copied()
+            return
+        }
         guard AXIsProcessTrusted() else {
             let alert = NSAlert()
             alert.messageText = "Allow ZPaste to paste"

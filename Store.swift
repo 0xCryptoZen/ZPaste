@@ -7,6 +7,11 @@ import SwiftData
 enum Store {
     static let container: ModelContainer = {
         let schema = Schema([Clip.self, Folder.self])
+        if UIPreviewData.enabled {
+            let previewConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+            do { return try ModelContainer(for: schema, configurations: [previewConfig]) }
+            catch { fatalError("Failed to initialize the preview container: \(error)") }
+        }
         let cloudConfig = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
         let localConfig = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
         if let c = try? ModelContainer(for: schema, configurations: [cloudConfig]) {
