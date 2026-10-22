@@ -13,6 +13,14 @@ actor VaultRepository {
     private var duplicates: [Data: (id: UUID, date: Date)] = [:]
     private var fingerprints: [UUID: Data] = [:]
     private var indexComplete = true
+    private struct CachedPayload {
+        let metadata: RecordMetadata
+        let sealed: Data
+        let payload: RecordPayload
+        let bytes: Int
+    }
+    private var decoded: [UUID: CachedPayload] = [:]
+    private var decodedBytes = 0
     private static let headerID = UUID(uuidString: "861CB4AD-9C39-4E4F-9087-7552646E1D12")!
     let paths: StorePaths
     private let memoryOnly: Bool
@@ -76,6 +84,7 @@ actor VaultRepository {
         if let expected, lease !== expected { return }
         key = nil; lease = nil; context = nil; container = nil; payloadByteCount = nil
         duplicates.removeAll(); fingerprints.removeAll(); duplicateKey = SymmetricKey(size: .bits256); indexComplete = true
+        decoded.removeAll(); decodedBytes = 0
     }
 
     private func openStore() throws {
@@ -97,7 +106,12 @@ actor VaultRepository {
 
     func payload(_ record: VaultRecord) throws -> RecordPayload {
         let (_, key) = try access()
-        return try VaultCipher.open(record.sealedPayload, metadata: record.metadata(), key: key)
+        let metadata = try record.metadata()
+        let sealed = record.sealedPayload
+        if let cached = decoded[record.id], cached.metadata == metadata, cached.sealed == sealed { return cached.payload }
+        let value = try VaultCipher.open(sealed, metadata: metadata, key: key)
+        cache(value, metadata: metadata, sealed: sealed)
+        return value
     }
 
     func write(_ metadata: RecordMetadata, payload: RecordPayload, existing: VaultRecord? = nil) throws {
@@ -109,6 +123,7 @@ actor VaultRepository {
             existing.pinRank = metadata.isPinned ? 1 : 0
             existing.folderID = metadata.folderID; existing.sealedPayload = sealed
         } else { context.insert(VaultRecord(metadata: metadata, sealedPayload: sealed)) }
+        cache(payload, metadata: metadata, sealed: sealed)
         if metadata.kind == .clip { index(metadata, text: payload.text) }
     }
 
@@ -174,7 +189,7 @@ actor VaultRepository {
     }
 
     func page(scope: HistoryScope, search: String, offset: Int = 0, limit: Int = VaultLimits.pageSize,
-              byteLimit: Int = VaultLimits.payloadBytes / 2, recent: Bool = false) throws -> VaultPage {
+              byteLimit: Int = VaultLimits.historyDisplayBytes, recent: Bool = false) throws -> VaultPage {
         let (context, _) = try access()
         var descriptor = request(scope: scope)
         if recent { descriptor.sortBy = [SortDescriptor(\VaultRecord.createdAt, order: .reverse), SortDescriptor(\VaultRecord.orderID)] }
@@ -227,7 +242,7 @@ actor VaultRepository {
             let count = try context.fetchCount(request(scope: .folder(record.id)))
             let displayed = VaultLimits.displayPrefix(value.text, bytes: 256)
             folderBytes += displayed.utf8.count
-            guard folderBytes <= VaultLimits.payloadBytes / 10 else { throw VaultError.capacity }
+            guard folderBytes <= VaultLimits.folderDisplayBytes else { throw VaultError.capacity }
             result.folders.append(FolderItem(id: record.id, name: displayed, count: count))
         }
         return result
@@ -285,7 +300,17 @@ actor VaultRepository {
         let (context, _) = try access()
         if let bytes = payloadByteCount { payloadByteCount = bytes - record.sealedPayload.count }
         if let digest = fingerprints.removeValue(forKey: record.id), duplicates[digest]?.id == record.id { duplicates[digest] = nil }
+        if let removed = decoded.removeValue(forKey: record.id) { decodedBytes -= removed.bytes }
         context.delete(record)
+    }
+
+    private func cache(_ value: RecordPayload, metadata: RecordMetadata, sealed: Data) {
+        if let old = decoded.removeValue(forKey: metadata.id) { decodedBytes -= old.bytes }
+        let bytes = value.text.utf8.count + (value.source?.utf8.count ?? 0)
+        guard bytes <= VaultLimits.decryptedCacheBytes else { return }
+        if decodedBytes + bytes > VaultLimits.decryptedCacheBytes { decoded.removeAll(); decodedBytes = 0 }
+        decoded[metadata.id] = CachedPayload(metadata: metadata, sealed: sealed, payload: value, bytes: bytes)
+        decodedBytes += bytes
     }
 
     private func createHeader() throws {

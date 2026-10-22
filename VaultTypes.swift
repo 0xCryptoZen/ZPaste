@@ -5,6 +5,10 @@ enum VaultLimits {
     static let payloadBytes = 20 * 1024 * 1024
     static let pinnedItems = 100
     static let pageSize = 100
+    static let decryptedCacheBytes = 4 * 1024 * 1024
+    static let historyDisplayBytes = 8 * 1024 * 1024
+    static let recentDisplayBytes = 3 * 1024 * 1024
+    static let folderDisplayBytes = 2 * 1024 * 1024
     static func acceptsNewText(_ text: String) -> Bool { text.utf8.count <= textBytes }
 
     static func displayPrefix(_ text: String, bytes limit: Int) -> String {

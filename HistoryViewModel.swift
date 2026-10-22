@@ -9,7 +9,7 @@ final class HistoryViewModel: ObservableObject {
 
     func clear() { queryID = UUID(); page = VaultPage(); loading = false }
 
-    func load(scope: HistoryScope, search: String, offset: Int = 0, limit: Int = 100, byteLimit: Int = VaultLimits.payloadBytes / 2) async {
+    func load(scope: HistoryScope, search: String, offset: Int = 0, limit: Int = 100, byteLimit: Int = VaultLimits.historyDisplayBytes) async {
         let vault = VaultSession.shared
         guard vault.isUnlocked, let repository = vault.repository, let lease = vault.activeLease else { clear(); return }
         let query = UUID()

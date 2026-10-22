@@ -165,7 +165,7 @@ final class VaultSession: ObservableObject {
             do {
                 let (summary, recent) = try await VaultAccess.$lease.withValue(lease) {
                     let summary = try await repository.summary()
-                    let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.payloadBytes / 5, recent: true)
+                    let recent = try await repository.page(scope: .all, search: "", limit: 8, byteLimit: VaultLimits.recentDisplayBytes, recent: true)
                     return (summary, recent)
                 }
                 guard epoch == generation, isUnlocked else { return }

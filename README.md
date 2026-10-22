@@ -41,7 +41,7 @@ Settings includes Clear Unpinned History and Delete ALL History. The latter incl
 - `⌘⇧V` opens the reusable compact search panel. The global shortcut can be changed in Settings; registration conflicts leave the old shortcut intact.
 - Type to search, use arrows to select, Return to execute the configured copy/paste action, and Escape to hide the app. Single click selects; double click executes. The full history window supports Space to preview, an explicit Copy button, pinning, and folders.
 - Choose a destination input before opening ZPaste. Automatic paste rechecks the target process, unlock state, cancellation, and clipboard change count before sending `⌘V`. Without Accessibility access, text is copied and you can paste manually.
-- The menu panel shows eight recent items. Full history is paged in groups of 100. Search is debounced by 150 ms and decrypts bounded batches while unlocked; no persistent plaintext search index exists. A bounded, ephemeral keyed fingerprint map accelerates duplicate lookup and is discarded on lock.
+- The menu panel shows eight recent items. Full history is paged in groups of 100. Search is debounced by 150 ms and decrypts bounded batches while unlocked; no persistent plaintext search index exists. A 4 MiB decrypted-payload cache avoids repeated decryption; hits require exact authenticated metadata and ciphertext matches. The history, recent-items, quick-search, folder, and repository payload budgets together total 20 MiB. Caches and the bounded, ephemeral keyed duplicate map are discarded on lock.
 
 ## Build and validation
 

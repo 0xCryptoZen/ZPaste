@@ -58,7 +58,10 @@ struct VaultBenchmarks {
             let p95 = percentile(searchTimes, 0.95)
             print(String(format: "BENCHMARK items=%d recent8_p50_ms=%.2f recent8_p95_ms=%.2f encrypted_search_p50_ms=%.2f encrypted_search_p95_ms=%.2f baseline_plaintext_array_search_p95_ms=%.2f",
                          count, percentile(recentTimes, 0.5), percentile(recentTimes, 0.95), percentile(searchTimes, 0.5), p95, percentile(baselineTimes, 0.95)))
-            if count == 1_000 { precondition(p95 <= 200 && percentile(recentTimes, 0.95) <= 200, "Repository latency exceeds the initial 200 ms budget") }
+            if count == 1_000 {
+                precondition(p95 + 150 <= 200 && percentile(recentTimes, 0.95) <= 200,
+                             "Search plus the 150 ms debounce exceeds the initial 200 ms budget")
+            }
             lease.invalidate(); await repository.lock()
         }
         var usage = rusage()

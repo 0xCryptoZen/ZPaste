@@ -80,7 +80,7 @@ private struct UnlockedQuickPasteView: View {
         .onDisappear { model.clear(); search = "" }
         .onChange(of: items.map(\.id), initial: true) { _, ids in selection = ClipboardPresentation.selection(selection, in: ids) }
         .task(id: query) {
-            if !search.isEmpty { await model.load(scope: .all, search: search, limit: 8, byteLimit: VaultLimits.payloadBytes / 5) }
+            if !search.isEmpty { await model.load(scope: .all, search: search, limit: 8, byteLimit: VaultLimits.recentDisplayBytes) }
             else { model.clear() }
         }
         .onKeyPress(.downArrow) { move(1); return .handled }

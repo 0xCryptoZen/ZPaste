@@ -16,6 +16,14 @@ final class SaveFailure: @unchecked Sendable {
     }
 }
 
+extension VaultRepository {
+    func corruptCachedPayloadForTest(_ id: UUID) throws {
+        let record = try find(id)
+        record.sealedPayload[record.sealedPayload.count - 1] ^= 1
+        try save()
+    }
+}
+
 @main
 struct VaultStorageTests {
     static func stage(_ message: String) { FileHandle.standardError.write(Data("VAULT TEST: \(message)\n".utf8)) }
@@ -171,6 +179,10 @@ struct VaultStorageTests {
         await expectFailure { try await pins.changeClip(pinPage.clips[100].id, pinned: true) }
         let pinSummary = try await pins.summary()
         precondition(pinSummary.pinned == 100)
+        let cachedID = pinPage.clips[0].id
+        _ = try await pins.text(cachedID)
+        try await pins.corruptCachedPayloadForTest(cachedID)
+        await expectFailure { _ = try await pins.text(cachedID) }
         await pins.lock()
 
         // An unrecognized old database must remain byte-for-byte unchanged, with no commit marker.
