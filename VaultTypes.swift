@@ -9,6 +9,8 @@ enum VaultLimits {
     static let historyDisplayBytes = 8 * 1024 * 1024
     static let recentDisplayBytes = 3 * 1024 * 1024
     static let folderDisplayBytes = 2 * 1024 * 1024
+    // The menu-bar window and hotkey panel can both retain a search result.
+    static let quickDisplayBytes = (payloadBytes - decryptedCacheBytes - historyDisplayBytes - recentDisplayBytes - folderDisplayBytes) / 2
     static func acceptsNewText(_ text: String) -> Bool { text.utf8.count <= textBytes }
 
     static func displayPrefix(_ text: String, bytes limit: Int) -> String {
