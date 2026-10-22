@@ -111,7 +111,7 @@ actor VaultRepository {
         let (_, key) = try access()
         let metadata = try record.metadata()
         let sealed = record.sealedPayload
-        if let cached = decoded[record.id], cached.metadata == metadata, cached.sealed == sealed { return cached.payload }
+        if let cached = decoded[metadata.id], cached.metadata == metadata, cached.sealed == sealed { return cached.payload }
         let value = try VaultCipher.open(sealed, metadata: metadata, key: key)
         cache(value, metadata: metadata, sealed: sealed)
         return value
@@ -196,7 +196,10 @@ actor VaultRepository {
         let (context, _) = try access()
         var descriptor = request(scope: scope)
         if recent { descriptor.sortBy = [SortDescriptor(\VaultRecord.createdAt, order: .reverse), SortDescriptor(\VaultRecord.orderID)] }
-        descriptor.fetchLimit = VaultLimits.pageSize
+        // Small stores can be sorted once without pulling a large legacy store into memory.
+        let smallStore = (payloadByteCount ?? Int.max) <= VaultLimits.decryptedCacheBytes
+        descriptor.fetchLimit = search.isEmpty ? min(limit, VaultLimits.pageSize) : (smallStore ? 1_000 : VaultLimits.pageSize)
+        descriptor.includePendingChanges = false
         descriptor.fetchOffset = offset
         var page = VaultPage()
         var bytes = 0

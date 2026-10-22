@@ -23,7 +23,8 @@ final class VaultRecord {
     }
 
     func metadata() throws -> RecordMetadata {
-        guard let kind = RecordKind(rawValue: kind), pinRank == (isPinned ? 1 : 0), orderID == id.uuidString else { throw VaultError.corrupt }
-        return RecordMetadata(id: id, kind: kind, createdAt: createdAt, isPinned: isPinned, folderID: folderID, version: version)
+        let identifier = id, pinned = isPinned
+        guard let kind = RecordKind(rawValue: kind), pinRank == (pinned ? 1 : 0), orderID == identifier.uuidString else { throw VaultError.corrupt }
+        return RecordMetadata(id: identifier, kind: kind, createdAt: createdAt, isPinned: pinned, folderID: folderID, version: version)
     }
 }
