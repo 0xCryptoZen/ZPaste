@@ -7,18 +7,19 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     private enum Page: String, CaseIterable, Identifiable {
-        case general = "General", privacy = "Privacy", keyboard = "Keyboard Shortcuts"
+        case general = "General", history = "History", privacy = "Privacy", keyboard = "Keyboard Shortcuts"
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .general: return "gearshape"
+            case .history: return "clock.arrow.circlepath"
             case .privacy: return "hand.raised"
             case .keyboard: return "keyboard"
             }
         }
     }
 
-    @Environment(\.dismiss) private var dismiss
+    var onClose: () -> Void = {}
     @Environment(\.modelContext) private var context
     @State private var page: Page? = .general
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -37,32 +38,32 @@ struct SettingsView: View {
     @AppStorage("hotKeyDisplay") private var hotKeyDisplay = "⌘⇧V"
 
     var body: some View {
-        VStack(spacing: 0) {
-            NavigationSplitView {
-                List(Page.allCases, selection: $page) { page in
-                    Label(page.rawValue, systemImage: page.icon).tag(page)
-                }
-                .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
-            } detail: {
-                Form {
-                    switch page ?? .general {
-                    case .general: general
-                    case .privacy: privacy
-                    case .keyboard: keyboard
-                    }
-                }
-                .formStyle(.grouped)
-                .navigationTitle((page ?? .general).rawValue)
+        NavigationSplitView {
+            List(Page.allCases, selection: $page) { page in
+                Label(page.rawValue, systemImage: page.icon).tag(page)
+                    .padding(.vertical, 3)
             }
-            Divider()
-            HStack {
-                Text("ZPaste · Text clipboard history").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            .listStyle(.sidebar)
+            .navigationTitle("ZPaste")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 195, max: 230)
+        } detail: {
+            Form {
+                switch page ?? .general {
+                case .general: general
+                case .history: history
+                case .privacy: privacy
+                case .keyboard: keyboard
+                }
             }
-            .padding(12)
+            .formStyle(.grouped)
+            .toggleStyle(.switch)
+            .navigationTitle((page ?? .general).rawValue)
         }
-        .frame(width: 800, height: 600)
+        .frame(minWidth: 740, idealWidth: 800, minHeight: 540, idealHeight: 620)
+        .background {
+            Button("Close Settings", action: onClose).keyboardShortcut("w", modifiers: .command).hidden()
+        }
+        .onKeyPress(.escape) { onClose(); return .handled }
         .onChange(of: retentionDays) { _, _ in policyChanged() }
         .onChange(of: historyLimit) { _, _ in policyChanged() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -83,7 +84,12 @@ struct SettingsView: View {
     private var general: some View {
         Group {
             Section("Startup & Recording") {
-                Toggle("Launch at login", isOn: $launchAtLogin)
+                Toggle(isOn: $launchAtLogin) {
+                    Text("Open at login")
+                    Text("Keep ZPaste ready in the menu bar.").font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Open at Login")
+                .accessibilityHint("Keep ZPaste ready in the menu bar.")
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {
                             if enabled { try SMAppService.mainApp.register() }
@@ -93,7 +99,12 @@ struct SettingsView: View {
                             errorMessage = "Could not change launch at login: \(error.localizedDescription)"
                         }
                     }
-                Toggle("Pause clipboard recording", isOn: $paused)
+                Toggle(isOn: $paused) {
+                    Text("Pause recording")
+                    Text("Existing history stays available.").font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Pause Recording")
+                .accessibilityHint("Existing history stays available.")
                 Toggle("Merge duplicate text", isOn: $mergeDuplicates)
                 Text("Copying the same text again moves its existing entry to the top and keeps its pin and folder.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -103,15 +114,24 @@ struct SettingsView: View {
                     Text("Paste into the previous app").tag(true)
                     Text("Copy to clipboard only").tag(false)
                 }
-                Text("Click the destination input field before opening ZPaste. History and menu-bar items use the same action. Text is always copied as plain text.")
+                Text("Choose an input field before opening ZPaste. Items are pasted as plain text.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    Label(trusted ? "Accessibility access enabled" : "Accessibility access needed for direct paste",
+                    Label(trusted ? "Accessibility enabled" : "Allow direct paste",
                           systemImage: trusted ? "checkmark.circle" : "exclamationmark.circle")
                     Spacer()
                     Button("Open Settings…") { PasteController.openAccessibilitySettings() }
                 }
             }
+            Section("Sync") {
+                Text("iCloud sync is not enabled in the downloadable build. History is stored on this Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var history: some View {
+        Group {
             Section("Keep History") {
                 Picker("Retention", selection: $retentionDays) {
                     Text("1 day").tag(1)
@@ -127,12 +147,13 @@ struct SettingsView: View {
                     Text("5,000").tag(5_000)
                     Text("Unlimited").tag(0)
                 }
-                Text("Pinned items are always kept. Changing these settings immediately removes expired or excess unpinned entries, including items in folders. Cleanup also runs automatically.")
+                Text("Applies to unpinned items, including those in folders. Shortening these limits immediately removes older history.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }
             }
-            Section("Sync") {
-                Text("iCloud sync is not enabled in the downloadable build. History is stored on this Mac.")
+            Section("Pinned Items") {
+                Label("Pins stay until you remove them", systemImage: "pin")
+                Text("Pinned items are excluded from retention limits and bulk clearing. Removing a folder keeps its items in All History.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -150,24 +171,33 @@ struct SettingsView: View {
             }
             Section("Ignored Apps") {
                 ForEach(ignoredIDs, id: \.self) { id in
-                    HStack {
-                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 24, height: 24)
+                    HStack(spacing: 12) {
+                        let app = SourceApplication.info(for: id)
+                        if let icon = app.icon {
+                            Image(nsImage: icon).resizable().frame(width: 30, height: 30)
+                        } else {
+                            Image(systemName: "app.dashed").font(.title2).foregroundStyle(.secondary).frame(width: 30, height: 30)
                         }
-                        Text(id).font(.callout).textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(app.name).font(.callout)
+                            if app.name != id { Text(id).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                        }
                         Spacer()
-                        Button("Remove", systemImage: "minus.circle") {
+                        Button {
                             ignoredIDs.removeAll { $0 == id }
                             saveIgnoredApps()
-                        }.labelStyle(.iconOnly)
+                        } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless).help("Remove \(app.name)")
+                        .accessibilityLabel("Remove \(app.name) from ignored apps")
                     }
+                    .padding(.vertical, 2)
                 }
                 Button("Add Application…", systemImage: "plus") { chooseApps() }
                 HStack {
                     TextField("Or enter an app bundle ID", text: $newID).onSubmit { addID() }
                     Button("Add") { addID() }.disabled(newID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                Text("Copies from these apps are not saved. Password managers and Keychain Access are ignored by default.")
+                Text("Future copies from these apps will not be saved. Changes do not remove existing history.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -181,7 +211,7 @@ struct SettingsView: View {
                     Spacer()
                     ShortcutRecorder(label: hotKeyDisplay) { code, modifiers, label in
                         do {
-                            try HotKeyManager.shared.register(keyCode: code, modifiers: modifiers)
+                            if !UIPreviewData.enabled { try HotKeyManager.shared.register(keyCode: code, modifiers: modifiers) }
                             UserDefaults.standard.set(Int(code), forKey: "hotKeyCode")
                             UserDefaults.standard.set(Int(modifiers), forKey: "hotKeyModifiers")
                             hotKeyDisplay = label
@@ -193,7 +223,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Reset to ⌘⇧V") {
                     do {
-                        try HotKeyManager.shared.register(keyCode: 9, modifiers: 768)
+                        if !UIPreviewData.enabled { try HotKeyManager.shared.register(keyCode: 9, modifiers: 768) }
                         UserDefaults.standard.set(9, forKey: "hotKeyCode")
                         UserDefaults.standard.set(768, forKey: "hotKeyModifiers")
                         hotKeyDisplay = "⌘⇧V"
@@ -204,6 +234,8 @@ struct SettingsView: View {
                 LabeledContent("Search", value: "⌘F")
                 LabeledContent("Move between items", value: "↑ / ↓")
                 LabeledContent("Use selected item", value: "Return")
+                LabeledContent("Preview selected item", value: "Space")
+                LabeledContent("Settings", value: "⌘,")
                 LabeledContent("Close window", value: "Escape")
             }
         }

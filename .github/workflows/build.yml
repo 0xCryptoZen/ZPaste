@@ -24,6 +24,9 @@ jobs:
       - name: Test clipboard policies
         run: bash scripts/test-policies.sh
 
+      - name: Test history presentation
+        run: bash scripts/test-presentation.sh
+
       - name: Test history storage
         run: bash scripts/test-storage.sh
 
