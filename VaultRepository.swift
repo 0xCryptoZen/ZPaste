@@ -33,6 +33,8 @@ actor VaultRepository {
 
     func unlock(key: SymmetricKey, lease: VaultLease) throws -> Bool {
         try lease.check()
+        // Never authenticate a new key using payloads cached under a previous unlock.
+        lock()
         self.key = key; self.lease = lease
         do {
             if memoryOnly {
@@ -82,6 +84,7 @@ actor VaultRepository {
 
     func lock(lease expected: VaultLease? = nil) {
         if let expected, lease !== expected { return }
+        lease?.invalidate()
         key = nil; lease = nil; context = nil; container = nil; payloadByteCount = nil
         duplicates.removeAll(); fingerprints.removeAll(); duplicateKey = SymmetricKey(size: .bits256); indexComplete = true
         decoded.removeAll(); decodedBytes = 0

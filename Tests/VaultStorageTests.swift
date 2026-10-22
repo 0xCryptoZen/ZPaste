@@ -113,6 +113,9 @@ struct VaultStorageTests {
         precondition(FileManager.default.fileExists(atPath: paths.database.path))
         let migratedAgain = try await repository.unlock(key: key, lease: VaultLease())
         precondition(!migratedAgain)
+        // Replacing an active session must not reuse cached payloads to validate a wrong key.
+        await expectFailure { _ = try await repository.unlock(key: SymmetricKey(size: .bits256), lease: VaultLease()) }
+        _ = try await repository.unlock(key: key, lease: VaultLease())
         try await repository.clear(includePinned: true)
         let empty = try await repository.summary()
         precondition(empty.count == 0 && empty.folders.isEmpty)

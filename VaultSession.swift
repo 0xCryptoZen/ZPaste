@@ -65,7 +65,7 @@ final class VaultSession: ObservableObject {
     }
 
     func unlock() {
-        guard state != .unlocking, !isUnlocked, let repository else { return }
+        guard state == .locked || state == .failed, let repository else { return }
         state = .unlocking; errorMessage = nil
         generation = UUID()
         let epoch = generation

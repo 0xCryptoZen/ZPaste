@@ -142,7 +142,7 @@ struct SettingsView: View {
                 if let error = vault.errorMessage { Text(error).font(.caption).foregroundStyle(.orange) }
                 Button(vault.isUnlocked ? "Lock Now" : "Unlock History") {
                     if vault.isUnlocked { vault.lock() } else { vault.unlock() }
-                }.disabled(vault.state == .unlocking)
+                }.disabled(vault.state == .unlocking || vault.state == .deleting)
                 Text("Direct paste uses Accessibility access. This build does not claim full App Sandbox isolation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
