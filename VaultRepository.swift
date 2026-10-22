@@ -194,6 +194,9 @@ actor VaultRepository {
     func page(scope: HistoryScope, search: String, offset: Int = 0, limit: Int = VaultLimits.pageSize,
               byteLimit: Int = VaultLimits.historyDisplayBytes, recent: Bool = false) throws -> VaultPage {
         let (context, _) = try access()
+        if !search.isEmpty, let cached = try cachedSearch(scope: scope, search: search, offset: offset, limit: limit, byteLimit: byteLimit) {
+            return cached
+        }
         var descriptor = request(scope: scope)
         if recent { descriptor.sortBy = [SortDescriptor(\VaultRecord.createdAt, order: .reverse), SortDescriptor(\VaultRecord.orderID)] }
         // Small stores can be sorted once without pulling a large legacy store into memory.
@@ -231,6 +234,50 @@ actor VaultRepository {
                 }
             }
             descriptor.fetchOffset = (descriptor.fetchOffset ?? 0) + records.count
+        }
+        return page
+    }
+
+    /// Scan the already authenticated payload cache only when it covers the complete store.
+    /// Selected records are checked against current metadata and ciphertext again before display.
+    private func cachedSearch(scope: HistoryScope, search: String, offset: Int, limit: Int, byteLimit: Int) throws -> VaultPage? {
+        let (context, _) = try access()
+        guard (payloadByteCount ?? Int.max) <= VaultLimits.decryptedCacheBytes,
+              decoded.count == (try context.fetchCount(FetchDescriptor<VaultRecord>())) else { return nil }
+        let scoped = decoded.values.filter {
+            guard $0.metadata.kind == .clip else { return false }
+            switch scope {
+            case .all: return true
+            case .pinned: return $0.metadata.isPinned
+            case .folder(let id): return $0.metadata.folderID == id
+            }
+        }
+        var matching = Set<UUID>()
+        for entry in scoped {
+            try checkLease()
+            if entry.payload.text.localizedCaseInsensitiveContains(search) { matching.insert(entry.metadata.id) }
+        }
+        if matching.isEmpty { return VaultPage() }
+        let order = [SortDescriptor(\RecordMetadata.pinRank, order: .reverse), SortDescriptor(\RecordMetadata.createdAt, order: .reverse), SortDescriptor(\RecordMetadata.orderID)]
+        let ordered = scoped.map(\.metadata).sorted(using: order)
+        var page = VaultPage(), bytes = 0
+        for index in ordered.indices where index >= offset && matching.contains(ordered[index].id) {
+            try checkLease()
+            let metadata = ordered[index]
+            let record = try find(metadata.id)
+            guard let cached = decoded[metadata.id], try record.metadata() == metadata,
+                  record.sealedPayload == cached.sealed else { throw VaultError.corrupt }
+            let value = try payload(record)
+            let source = value.source.map { VaultLimits.displayPrefix($0, bytes: 256) }
+            let size = value.text.utf8.count + (source?.utf8.count ?? 0)
+            if bytes + size > byteLimit { page.nextOffset = index; return page }
+            bytes += size
+            page.clips.append(ClipItem(id: metadata.id, text: value.text, createdAt: metadata.createdAt,
+                isPinned: metadata.isPinned, sourceAppBundleID: source, folderID: metadata.folderID))
+            if page.clips.count == limit {
+                page.nextOffset = index + 1 < ordered.count ? index + 1 : nil
+                return page
+            }
         }
         return page
     }

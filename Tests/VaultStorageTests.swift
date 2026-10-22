@@ -186,6 +186,7 @@ struct VaultStorageTests {
         _ = try await pins.text(cachedID)
         try await pins.corruptCachedPayloadForTest(cachedID)
         await expectFailure { _ = try await pins.text(cachedID) }
+        await expectFailure { _ = try await pins.page(scope: .all, search: pinPage.clips[0].text) }
         await pins.lock()
 
         // An unrecognized old database must remain byte-for-byte unchanged, with no commit marker.

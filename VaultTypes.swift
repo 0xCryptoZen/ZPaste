@@ -34,6 +34,8 @@ struct RecordMetadata: Codable, Equatable, Sendable {
     var isPinned: Bool
     var folderID: UUID?
     var version: Int = 1
+    var pinRank: Int { isPinned ? 1 : 0 }
+    var orderID: String { id.uuidString }
 }
 
 struct RecordPayload: Codable, Equatable, Sendable {
