@@ -38,6 +38,8 @@ struct QuickPasteView: View {
 private struct UnlockedQuickPasteView: View {
     @ObservedObject private var vault = VaultSession.shared
     @ObservedObject private var status = AppStatus.shared
+    @ObservedObject private var paste = PasteController.shared
+    @AppStorage("pasteOnClick") private var pasteOnClick = true
     @StateObject private var model = HistoryViewModel()
     @State private var search = ""
     @State private var selection: UUID?
@@ -71,7 +73,7 @@ private struct UnlockedQuickPasteView: View {
                 }.listStyle(.inset)
             }
             HStack {
-                Text(status.errorMessage ?? status.feedback ?? (UIPreviewData.enabled ? "Preview · Clipboard unchanged" : (paused ? "Paused" : "↑ ↓ Select · Return Use · Esc Close")))
+                Text(status.errorMessage ?? status.feedback ?? (UIPreviewData.enabled ? "Preview · Clipboard unchanged" : (paused ? "Paused" : (pasteOnClick ? "Return: paste into \(paste.targetName) · Esc: close" : "Return: copy only · Esc: close"))))
                     .font(.caption).foregroundStyle(status.errorMessage == nil ? Color.secondary : Color.orange).lineLimit(2)
                 Spacer()
             }.padding(12)

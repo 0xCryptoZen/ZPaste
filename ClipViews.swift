@@ -65,6 +65,8 @@ struct ClipRowView: View {
         .padding(.vertical, 8).padding(.horizontal, 4).contentShape(Rectangle())
         .onTapGesture(count: 2) { onSelect(); VaultSession.shared.use(clip.id) }
         .onTapGesture { onSelect() }
+        .accessibilityAction(named: Text("Use Item")) { VaultSession.shared.use(clip.id) }
+        .accessibilityAction(named: Text("Copy Only")) { VaultSession.shared.use(clip.id, copyOnly: true) }
         .onHover { hovered = $0 }
         .contextMenu {
             Button("Paste into Previous App") { VaultSession.shared.use(clip.id, forcePaste: true) }
