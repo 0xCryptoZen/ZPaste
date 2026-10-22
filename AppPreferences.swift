@@ -32,9 +32,13 @@ final class AppStatus: ObservableObject {
     @Published private(set) var feedback: String?
     private var feedbackTask: Task<Void, Never>?
 
-    func copied() {
+    func copied() { showFeedback("Copied to clipboard") }
+
+    func previewed() { showFeedback("Preview only · Clipboard unchanged") }
+
+    private func showFeedback(_ message: String) {
         feedbackTask?.cancel()
-        feedback = "Copied to clipboard"
+        feedback = message
         feedbackTask = Task { @MainActor in
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
             feedback = nil

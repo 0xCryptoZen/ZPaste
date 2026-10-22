@@ -15,8 +15,8 @@ struct MenuBarView: View {
             HStack(spacing: 10) {
                 Image(systemName: "doc.on.clipboard").font(.title3).foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("ZPaste").font(.headline)
-                    Text(status.feedback ?? (paused ? "Recording paused" : "Your clipboard, close at hand"))
+                    Text(UIPreviewData.enabled ? "ZPaste · UI Preview" : "ZPaste").font(.headline)
+                    Text(status.feedback ?? (UIPreviewData.enabled ? "Sample data · Recording disabled" : (paused ? "Recording paused" : "Your clipboard, close at hand")))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -40,7 +40,8 @@ struct MenuBarView: View {
                 HStack {
                     Text("Recent").font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(pasteOnClick ? "Click to paste" : "Click to copy").font(.caption).foregroundStyle(.secondary)
+                    Text(UIPreviewData.enabled ? "Preview only" : (pasteOnClick ? "Click to paste" : "Click to copy"))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 6)
                 ScrollView {

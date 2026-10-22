@@ -40,13 +40,25 @@ struct HistoryView: View {
             sidebar
         } detail: {
             VStack(spacing: 0) {
+                if UIPreviewData.enabled {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "eye").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("UI Preview").fontWeight(.semibold)
+                            Text("Sample history only. Clipboard recording and pasting are disabled. Open ZPaste.app from the downloaded build for normal use.")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12))
+                }
                 if filteredClips.isEmpty { emptyState }
                 else { historyList }
                 Divider()
                 footer
                 if let error = status.errorMessage { errorBanner(error) }
             }
-            .navigationTitle(scopeTitle)
+            .navigationTitle(UIPreviewData.enabled ? "\(scopeTitle) · UI Preview" : scopeTitle)
         }
         .frame(minWidth: 780, minHeight: 500)
         .toolbar { historyToolbar }
@@ -194,12 +206,13 @@ struct HistoryView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Label(paused ? "Paused" : "Recording", systemImage: paused ? "pause.circle" : "checkmark.circle")
-                .foregroundStyle(paused ? Color.orange : Color.secondary)
+            Label(UIPreviewData.enabled ? "Preview · Not Recording" : (paused ? "Paused" : "Recording"),
+                  systemImage: UIPreviewData.enabled ? "eye" : (paused ? "pause.circle" : "checkmark.circle"))
+                .foregroundStyle(UIPreviewData.enabled || paused ? Color.orange : Color.secondary)
             Text("·")
             Text("\(filteredClips.count.formatted()) \(filteredClips.count == 1 ? "item" : "items")")
             Spacer()
-            Text(status.feedback ?? (pasteOnClick ? "Click to paste into \(paste.targetName)" : "Click to copy"))
+            Text(status.feedback ?? (UIPreviewData.enabled ? "System clipboard unchanged" : (pasteOnClick ? "Click to paste into \(paste.targetName)" : "Click to copy")))
                 .lineLimit(1)
         }
         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 9)
