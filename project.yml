@@ -19,6 +19,7 @@ targets:
           - ".github"
           - "Tests"
           - "scripts"
+          - "HistoryMaintenance.swift" # Legacy plaintext writer is test-only, never linked into the app.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.zpaste

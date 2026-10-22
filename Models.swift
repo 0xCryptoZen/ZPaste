@@ -1,9 +1,8 @@
 import Foundation
 import SwiftData
 
-/// A single clipboard history entry.
-/// All properties carry defaults (CloudKit sync requires optional or
-/// default-valued properties).
+/// Historical plaintext schema, opened read-only during migration.
+/// Keep its defaults and relationships stable so old stores remain readable.
 @Model
 final class Clip {
     var text: String = ""
