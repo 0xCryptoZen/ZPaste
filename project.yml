@@ -16,6 +16,8 @@ targets:
           - "README.md"
           - ".git"
           - ".github"
+          - "Tests"
+          - "scripts"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.zpaste

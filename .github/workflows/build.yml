@@ -21,6 +21,12 @@ jobs:
       - name: Xcode version
         run: xcodebuild -version
 
+      - name: Test clipboard policies
+        run: bash scripts/test-policies.sh
+
+      - name: Test history storage
+        run: bash scripts/test-storage.sh
+
       - name: Build (no signing)
         run: |
           xcodebuild -project ZPaste.xcodeproj \
