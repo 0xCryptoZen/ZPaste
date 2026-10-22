@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   pull_request:
 
 jobs:
@@ -30,11 +30,17 @@ jobs:
       - name: Test history storage
         run: bash scripts/test-storage.sh
 
+      - name: Test authenticated encryption
+        run: bash scripts/test-cipher.sh
+
+      - name: Test encrypted storage and migration
+        run: bash scripts/test-vault-storage.sh
+
       - name: Build (no signing)
         run: |
           xcodebuild -project ZPaste.xcodeproj \
             -scheme ZPaste \
-            -configuration Debug \
+            -configuration Release \
             -destination 'platform=macOS' \
             -derivedDataPath "$RUNNER_TEMP/ZPaste-build" \
             CODE_SIGNING_ALLOWED=NO \
@@ -43,7 +49,7 @@ jobs:
       - name: Package app
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            "$RUNNER_TEMP/ZPaste-build/Build/Products/Debug/ZPaste.app" \
+            "$RUNNER_TEMP/ZPaste-build/Build/Products/Release/ZPaste.app" \
             "$RUNNER_TEMP/ZPaste-macOS.zip"
 
       - name: Upload app

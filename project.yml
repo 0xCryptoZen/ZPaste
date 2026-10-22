@@ -24,6 +24,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
         SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: ZPaste.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
 schemes:
   ZPaste:
     build:

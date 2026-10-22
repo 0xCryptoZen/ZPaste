@@ -7,10 +7,20 @@ extension Notification.Name {
 
 enum AppPreferences {
     static func registerDefaults() {
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: "vaultPreferencesInitialized") {
+            let hasLegacy = (try? StorePaths.standard()).map { FileManager.default.fileExists(atPath: $0.legacy.path) } ?? false
+            if hasLegacy {
+                defaults.set(defaults.object(forKey: "retentionDays") as? Int ?? 0, forKey: "retentionDays")
+                defaults.set(defaults.object(forKey: "historyLimit") as? Int ?? 0, forKey: "historyLimit")
+                defaults.set(true, forKey: "legacyPolicyPending")
+            }
+            defaults.set(true, forKey: "vaultPreferencesInitialized")
+        }
         UserDefaults.standard.register(defaults: [
             "pasteOnClick": true,
-            "retentionDays": 0,
-            "historyLimit": 0,
+            "retentionDays": 7,
+            "historyLimit": 500,
             "capturePaused": false,
             "mergeDuplicates": true,
             "ignoreConfidential": true,
@@ -35,6 +45,11 @@ final class AppStatus: ObservableObject {
     func copied() { showFeedback("Copied to clipboard") }
 
     func previewed() { showFeedback("Preview only · Clipboard unchanged") }
+
+    func clear() {
+        feedbackTask?.cancel(); feedbackTask = nil
+        feedback = nil; errorMessage = nil
+    }
 
     private func showFeedback(_ message: String) {
         feedbackTask?.cancel()
