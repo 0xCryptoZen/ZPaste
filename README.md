@@ -98,3 +98,19 @@ The repo does not commit a `.xcodeproj`. Create one in Xcode in about 5 minutes:
 ## Disclaimer
 
 This project is for learning and research only and is an independent implementation; it contains no code from Paste or its team. Paste is a trademark of Paste Team ApS.
+## History actions and management
+
+- Place the cursor in your destination input, then open ZPaste with the global shortcut or menu-bar icon. Click a history item to paste plain text back into that app. This requires Accessibility access in System Settings → Privacy & Security → Accessibility. Without access, the item is copied and ZPaste explains how to enable pasting.
+- Settings → General → Clicking a History Item can switch clicks to **Copy to clipboard only**. Right-click any item for explicit Paste / Copy Only actions.
+- Settings → Keyboard Shortcuts records a new global shortcut and checks registration before saving it. Use Command, Control, or Option; Escape cancels recording. The default is ⌘⇧V. In History, ⌘F focuses search, arrows select a row, Return uses it, and Escape closes the window.
+- History retention supports 1 day, 1 week, 30 days, 365 days, or forever (default). An optional limit keeps the newest 100 / 500 / 1,000 / 5,000 unpinned items. Changes clean existing history immediately; cleanup also runs on launch, every minute, and after a capture. **Pins are exempt**, while unpinned items inside folders follow the same policy.
+- Pause/resume recording from History, the menu-bar panel, or Settings. Resuming captures future copies only. Duplicate merging brings matching text to the top while preserving its pin and folder; it can be disabled.
+- Settings → Privacy filters source apps and clipboard items marked confidential, temporary, or automatically generated. Confidential markers are supplied by other apps; this is not a general secret detector. Add sensitive apps with the application picker or their bundle IDs. Existing custom ignore lists are preserved.
+- Right-click folders to rename or delete them. Deleting a folder keeps its clips in All. The history management menu exports the displayed text to a file or clears all unpinned items after confirmation. Exported files contain the selected history in plain text.
+- The downloadable CI build stores history locally; iCloud requires separate signing and container setup.
+
+## Validation
+
+`bash scripts/test-policies.sh` tests capture/privacy filters, retention boundaries, pin protection, exact clipboard write suppression, and paste-delivery guards using the Swift compiler.
+
+`bash scripts/test-storage.sh` additionally requires full Xcode (SwiftData macros) and exercises the actual in-memory SwiftData schema, duplicate merging, limits, cleanup, pin/folder preservation, and folder deletion. Both run in GitHub Actions before the app build and artifact upload. Direct paste still needs an on-device test with Accessibility access and the destination app's editable field focused; CI checks cannot grant that permission for a user.

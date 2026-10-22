@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            PasteController.shared.start()
             // Pure menu-bar app (no Dock icon).
             NSApp.setActivationPolicy(.accessory)
 
@@ -20,8 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.start()
         }
 
-        // Global hotkey ⌘⇧V.
-        HotKeyManager.shared.registerDefault()
+        MainActor.assumeIsolated {
+            do { try HotKeyManager.shared.registerSaved() }
+            catch { AppStatus.shared.errorMessage = error.localizedDescription }
+        }
 
         NotificationCenter.default.addObserver(
             forName: .quickPasteHotKey, object: nil, queue: .main
@@ -39,12 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             self.monitor?.stop()
+            PasteController.shared.stop()
+            HotKeyManager.shared.unregister()
         }
-        HotKeyManager.shared.unregister()
     }
 
     @MainActor
     private func showHistory() {
+        PasteController.shared.rememberFrontmostApplication()
         if historyWindow == nil {
             let root = HistoryView().modelContainer(Store.container)
             let hosting = NSHostingController(rootView: root)

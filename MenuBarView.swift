@@ -1,51 +1,50 @@
 import AppKit
-import SwiftUI
 import SwiftData
+import SwiftUI
 
-/// Menu-bar drop-down panel: recent clips + open history + quit.
 struct MenuBarView: View {
+    @Environment(\.dismiss) private var dismiss
     @Query(sort: \Clip.createdAt, order: .reverse) private var recentClips: [Clip]
+    @AppStorage("capturePaused") private var paused = false
+    @AppStorage("hotKeyDisplay") private var shortcut = "⌘⇧V"
+    @State private var showingSettings = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 NotificationCenter.default.post(name: .showHistoryWindow, object: nil)
+                dismiss()
             } label: {
-                Label("Open History", systemImage: "clock")
+                HStack { Label("Open History", systemImage: "clock"); Spacer(); Text(shortcut).foregroundStyle(.secondary) }
             }
-
             Divider()
-
             if recentClips.isEmpty {
-                Text("No items yet").foregroundStyle(.secondary).padding(.vertical, 4)
+                Text("Copy text to get started").foregroundStyle(.secondary).padding(.vertical, 4)
             } else {
-                Text("Recent").font(.caption).foregroundStyle(.secondary)
+                Text("Recent · click to use").font(.caption).foregroundStyle(.secondary)
                 ForEach(recentClips.prefix(10)) { clip in
                     Button {
-                        copy(clip.text)
+                        dismiss()
+                        PasteController.shared.select(clip.text)
                     } label: {
-                        Text(clip.text)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(.secondary) }
+                            Text(clip.text).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { Button("Copy Only") { PasteController.shared.copy(clip.text) } }
                 }
             }
-
             Divider()
-
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+            Button(paused ? "Resume Recording" : "Pause Recording", systemImage: paused ? "play" : "pause") { paused.toggle() }
+            Button("Settings…", systemImage: "gearshape") { showingSettings = true }
+            Button("Quit") { NSApplication.shared.terminate(nil) }
         }
-        .padding(10)
-        .frame(width: 340)
-    }
-
-    private func copy(_ text: String) {
-        ClipboardMonitor.skipNextChange = true
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        .padding(12).frame(width: 360)
+        .onAppear { PasteController.shared.rememberFrontmostApplication() }
+        .sheet(isPresented: $showingSettings) { SettingsView() }
     }
 }

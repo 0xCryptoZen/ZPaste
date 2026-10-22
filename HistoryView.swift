@@ -1,29 +1,34 @@
 import AppKit
-import CoreGraphics
-import SwiftUI
 import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 struct HistoryView: View {
     @Environment(\.modelContext) private var context
-
     @Query(sort: \Clip.createdAt, order: .reverse) private var allClips: [Clip]
     @Query(sort: \Folder.name) private var folders: [Folder]
-
+    @ObservedObject private var paste = PasteController.shared
+    @ObservedObject private var status = AppStatus.shared
+    @AppStorage("capturePaused") private var paused = false
+    @AppStorage("pasteOnClick") private var pasteOnClick = true
     @State private var searchText = ""
     @State private var selectedFolderID: PersistentIdentifier?
+    @State private var selectedClipID: PersistentIdentifier?
+    @State private var pinnedOnly = false
     @State private var showingSettings = false
-    @State private var showingNewFolder = false
-    @State private var newFolderName = ""
+    @State private var showingFolderEditor = false
+    @State private var editingFolder: Folder?
+    @State private var deletingFolder: Folder?
+    @State private var folderName = ""
+    @State private var confirmClear = false
+    @FocusState private var searchFocused: Bool
 
     private var filteredClips: [Clip] {
-        var result = allClips
-        if let id = selectedFolderID {
-            result = result.filter { $0.folder?.persistentModelID == id }
-        }
-        if !searchText.isEmpty {
-            result = result.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
-        }
-        return result.sorted { a, b in
+        allClips.filter { clip in
+            (!pinnedOnly || clip.isPinned) &&
+            (selectedFolderID == nil || clip.folder?.persistentModelID == selectedFolderID) &&
+            (searchText.isEmpty || clip.text.localizedCaseInsensitiveContains(searchText))
+        }.sorted { a, b in
             if a.isPinned != b.isPinned { return a.isPinned }
             return a.createdAt > b.createdAt
         }
@@ -32,167 +37,202 @@ struct HistoryView: View {
     var body: some View {
         NavigationSplitView {
             List {
-                Button {
-                    selectedFolderID = nil
-                } label: {
-                    Label("All", systemImage: "tray")
-                        .foregroundStyle(selectedFolderID == nil ? Color.primary : Color.secondary)
-                }
-                .buttonStyle(.plain)
-
-                ForEach(folders) { folder in
-                    Button {
-                        selectedFolderID = folder.persistentModelID
-                    } label: {
-                        Label(folder.name, systemImage: "folder")
-                            .foregroundStyle(selectedFolderID == folder.persistentModelID ? Color.primary : Color.secondary)
+                Button { selectedFolderID = nil; pinnedOnly = false } label: {
+                    Label("All (\(allClips.count))", systemImage: "tray")
+                }.buttonStyle(.plain)
+                Button { selectedFolderID = nil; pinnedOnly = true } label: {
+                    Label("Pinned (\(allClips.filter(\.isPinned).count))", systemImage: "pin")
+                }.buttonStyle(.plain)
+                Section("Folders") {
+                    ForEach(folders) { folder in
+                        Button { selectedFolderID = folder.persistentModelID; pinnedOnly = false } label: {
+                            Label(folder.name, systemImage: "folder")
+                                .foregroundStyle(selectedFolderID == folder.persistentModelID ? Color.accentColor : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Rename…") { editingFolder = folder; folderName = folder.name; showingFolderEditor = true }
+                            Button("Delete Folder…", role: .destructive) { deletingFolder = folder }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 140, ideal: 180)
+            .navigationSplitViewColumnWidth(min: 150, ideal: 190)
         } detail: {
             VStack(spacing: 0) {
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search…", text: $searchText)
-                        .textFieldStyle(.plain)
-                    Spacer()
-                    Button {
-                        showingNewFolder = true
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
-                    }
-                    .help("New Folder")
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .help("Settings")
-                }
-                .padding(10)
-
+                toolbar
                 Divider()
-
                 if filteredClips.isEmpty {
-                    Spacer()
-                    Text("Copy something and it will show up here").foregroundStyle(.secondary)
-                    Spacer()
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No History" : "No Results",
+                        systemImage: searchText.isEmpty ? "clipboard" : "magnifyingglass",
+                        description: Text(paused ? "Recording is paused. Resume to save new copies." : "Copy text or change the search and folder filters.")
+                    )
                 } else {
-                    List(filteredClips) { clip in
-                        ClipRow(clip: clip, folders: folders)
+                    List(selection: $selectedClipID) {
+                        ForEach(filteredClips) { clip in
+                            ClipRow(clip: clip, folders: folders) {
+                                selectedClipID = clip.persistentModelID
+                                paste.select(clip.text)
+                            }
+                            .tag(clip.persistentModelID)
+                        }
                     }
+                    .onKeyPress(.return) { useSelectedItem(); return .handled }
+                }
+                Divider()
+                footer
+                if let error = status.errorMessage {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text(error).font(.caption).textSelection(.enabled)
+                        Spacer()
+                        Button("Dismiss") { status.errorMessage = nil }
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.12))
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 480)
-        .alert("New Folder", isPresented: $showingNewFolder) {
-            TextField("Name", text: $newFolderName)
-            Button("Create") { createFolder() }
-            Button("Cancel", role: .cancel) { newFolderName = "" }
+        .frame(minWidth: 720, minHeight: 480)
+        .onKeyPress(.escape) { NSApp.hide(nil); return .handled }
+        .background {
+            Button("Search") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden()
         }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
+        .alert(editingFolder == nil ? "New Folder" : "Rename Folder", isPresented: $showingFolderEditor) {
+            TextField("Name", text: $folderName)
+            Button("Save") { saveFolder() }
+            Button("Cancel", role: .cancel) { editingFolder = nil; folderName = "" }
         }
+        .confirmationDialog("Delete this folder?", isPresented: Binding(
+            get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }
+        )) {
+            Button("Delete Folder", role: .destructive) {
+                guard let folder = deletingFolder else { return }
+                if selectedFolderID == folder.persistentModelID { selectedFolderID = nil }
+                context.delete(folder)
+                save()
+                deletingFolder = nil
+            }
+        } message: { Text("Its history items will remain in All.") }
+        .confirmationDialog("Clear all unpinned history?", isPresented: $confirmClear) {
+            Button("Clear Unpinned History", role: .destructive) {
+                do { try HistoryMaintenance.clearUnpinned(in: context) }
+                catch { context.rollback(); status.errorMessage = error.localizedDescription }
+            }
+        } message: { Text("This cannot be undone. Pinned items and folders will be kept.") }
+        .sheet(isPresented: $showingSettings) { SettingsView() }
     }
 
-    private func createFolder() {
-        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        newFolderName = ""
+    private var toolbar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search…", text: $searchText)
+                .textFieldStyle(.plain).focused($searchFocused)
+                .onSubmit { useSelectedItem() }
+            Button { paused.toggle() } label: { Image(systemName: paused ? "play.fill" : "pause.fill") }
+                .help(paused ? "Resume Recording" : "Pause Recording")
+                .accessibilityLabel(paused ? "Resume Recording" : "Pause Recording")
+            Button { editingFolder = nil; folderName = ""; showingFolderEditor = true } label: { Image(systemName: "folder.badge.plus") }
+                .help("New Folder").accessibilityLabel("New Folder")
+            Menu {
+                Button("Export Displayed Items…") { exportItems() }.disabled(filteredClips.isEmpty)
+                Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }
+            } label: { Image(systemName: "ellipsis.circle") }
+                .help("Manage History").accessibilityLabel("Manage History")
+            Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                .help("Settings").accessibilityLabel("Settings")
+        }
+        .padding(10)
+    }
+
+    private var footer: some View {
+        HStack {
+            Text("\(filteredClips.count) items")
+            if paused { Label("Recording paused", systemImage: "pause.circle") }
+            Spacer()
+            Text(pasteOnClick ? "Click to paste into \(paste.targetName)" : "Click to copy")
+        }
+        .font(.caption).foregroundStyle(.secondary).padding(10)
+    }
+
+    private func useSelectedItem() {
+        let clip = filteredClips.first { $0.persistentModelID == selectedClipID } ?? filteredClips.first
+        if let clip { paste.select(clip.text) }
+    }
+
+    private func saveFolder() {
+        let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        context.insert(Folder(name: name))
-        try? context.save()
+        if let editingFolder { editingFolder.name = name }
+        else { context.insert(Folder(name: name)) }
+        save()
+        editingFolder = nil
+        folderName = ""
+    }
+
+    private func save() {
+        do { try context.save() }
+        catch { context.rollback(); status.errorMessage = error.localizedDescription }
+    }
+
+    private func exportItems() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "ZPaste-history.txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try filteredClips.map(\.text).joined(separator: "\n\n---\n\n").write(to: url, atomically: true, encoding: .utf8) }
+        catch { status.errorMessage = "Could not export history: \(error.localizedDescription)" }
     }
 }
 
-/// A single history entry.
 private struct ClipRow: View {
     @Environment(\.modelContext) private var context
     let clip: Clip
     let folders: [Folder]
+    let onSelect: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(clip.text)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-                HStack(spacing: 8) {
-                    Text(clip.createdAt, style: .relative)
-                        .foregroundStyle(.secondary)
-                    if let name = appName(for: clip.sourceAppBundleID) {
-                        Text(name).foregroundStyle(.secondary)
+            Button(action: onSelect) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(clip.text).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 8) {
+                        Text(clip.createdAt, style: .relative)
+                        if let id = clip.sourceAppBundleID {
+                            Text(NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)?.deletingPathExtension().lastPathComponent ?? id)
+                        }
+                        if let folder = clip.folder { Label(folder.name, systemImage: "folder") }
                     }
-                    if clip.folder != nil {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                    }
+                    .font(.caption).foregroundStyle(.secondary)
                 }
-                .font(.caption)
+                .contentShape(Rectangle())
             }
-            Spacer()
-            Button {
-                togglePin()
-            } label: {
+            .buttonStyle(.plain)
+            .accessibilityHint("Use this history item")
+            Button { clip.isPinned.toggle(); save() } label: {
                 Image(systemName: clip.isPinned ? "pin.fill" : "pin")
-                    .foregroundStyle(clip.isPinned ? .yellow : .secondary)
+                    .foregroundStyle(clip.isPinned ? Color.yellow : Color.secondary)
             }
             .buttonStyle(.borderless)
             .help(clip.isPinned ? "Unpin" : "Pin")
+            .accessibilityLabel(clip.isPinned ? "Unpin" : "Pin")
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 5)
         .contextMenu {
-            Button("Copy") { copy() }
-            Button("Copy & Paste to Frontmost App") { copyAndPaste() }
+            Button("Paste into Previous App") { PasteController.shared.select(clip.text, forcePaste: true) }
+            Button("Copy Only") { PasteController.shared.copy(clip.text) }
             Menu("Move to Folder") {
-                Button("None") { move(to: nil) }
-                ForEach(folders) { folder in
-                    Button(folder.name) { move(to: folder) }
-                }
+                Button("None") { clip.folder = nil; save() }
+                ForEach(folders) { folder in Button(folder.name) { clip.folder = folder; save() } }
             }
             Divider()
-            Button("Delete", role: .destructive) { delete() }
+            Button("Delete", role: .destructive) { context.delete(clip); save() }
         }
     }
 
-    private func copy() {
-        ClipboardMonitor.skipNextChange = true
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(clip.text, forType: .string)
-    }
-
-    private func copyAndPaste() {
-        copy()
-        // Requires the Accessibility permission; otherwise it only copies.
-        let src = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true) // V
-        down?.flags = .maskCommand
-        let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        up?.flags = .maskCommand
-        down?.post(tap: .cghidEventTap)
-        up?.post(tap: .cghidEventTap)
-    }
-
-    private func togglePin() {
-        clip.isPinned.toggle()
-        try? context.save()
-    }
-
-    private func move(to folder: Folder?) {
-        clip.folder = folder
-        try? context.save()
-    }
-
-    private func delete() {
-        context.delete(clip)
-        try? context.save()
-    }
-
-    private func appName(for bundleID: String?) -> String? {
-        guard let bundleID else { return nil }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return bundleID
-        }
-        return url.deletingPathExtension().lastPathComponent
+    private func save() {
+        do { try context.save() }
+        catch { context.rollback(); AppStatus.shared.errorMessage = error.localizedDescription }
     }
 }

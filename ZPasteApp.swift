@@ -5,6 +5,10 @@ import SwiftData
 struct ZPasteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        AppPreferences.registerDefaults()
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
