@@ -41,7 +41,7 @@ final class RecorderButton: NSButton {
         window?.makeFirstResponder(self)
         recording = true
         title = "Press shortcut… (Esc cancels)"
-        HotKeyManager.shared.unregister()
+        if !UIPreviewData.enabled { HotKeyManager.shared.unregister() }
     }
 
     override func keyDown(with event: NSEvent) {
@@ -84,6 +84,7 @@ final class RecorderButton: NSButton {
     private func finish() {
         recording = false
         title = displayLabel
+        guard !UIPreviewData.enabled else { return }
         do { try HotKeyManager.shared.registerSaved() }
         catch { AppStatus.shared.errorMessage = error.localizedDescription }
     }

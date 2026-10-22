@@ -88,6 +88,8 @@ struct SettingsView: View {
                     Text("Open at login")
                     Text("Keep ZPaste ready in the menu bar.").font(.caption).foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("Open at Login")
+                .accessibilityHint("Keep ZPaste ready in the menu bar.")
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {
                             if enabled { try SMAppService.mainApp.register() }
@@ -101,6 +103,8 @@ struct SettingsView: View {
                     Text("Pause recording")
                     Text("Existing history stays available.").font(.caption).foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("Pause Recording")
+                .accessibilityHint("Existing history stays available.")
                 Toggle("Merge duplicate text", isOn: $mergeDuplicates)
                 Text("Copying the same text again moves its existing entry to the top and keeps its pin and folder.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -207,7 +211,7 @@ struct SettingsView: View {
                     Spacer()
                     ShortcutRecorder(label: hotKeyDisplay) { code, modifiers, label in
                         do {
-                            try HotKeyManager.shared.register(keyCode: code, modifiers: modifiers)
+                            if !UIPreviewData.enabled { try HotKeyManager.shared.register(keyCode: code, modifiers: modifiers) }
                             UserDefaults.standard.set(Int(code), forKey: "hotKeyCode")
                             UserDefaults.standard.set(Int(modifiers), forKey: "hotKeyModifiers")
                             hotKeyDisplay = label
@@ -219,7 +223,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Reset to ⌘⇧V") {
                     do {
-                        try HotKeyManager.shared.register(keyCode: 9, modifiers: 768)
+                        if !UIPreviewData.enabled { try HotKeyManager.shared.register(keyCode: 9, modifiers: 768) }
                         UserDefaults.standard.set(9, forKey: "hotKeyCode")
                         UserDefaults.standard.set(768, forKey: "hotKeyModifiers")
                         hotKeyDisplay = "⌘⇧V"

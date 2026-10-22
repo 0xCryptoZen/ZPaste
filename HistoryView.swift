@@ -164,6 +164,14 @@ struct HistoryView: View {
                 Button("New Folder…", systemImage: "folder.badge.plus") { editingFolder = nil; showingFolderEditor = true }
                 Button("Export Displayed Items…", systemImage: "square.and.arrow.up") { exportItems() }.disabled(filteredClips.isEmpty)
                 Divider()
+                if UIPreviewData.enabled {
+                    Menu("Preview Appearance") {
+                        Button("Light") { NSApp.appearance = NSAppearance(named: .aqua) }
+                        Button("Dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+                        Divider()
+                        Button("Compact Window") { NSApp.keyWindow?.setContentSize(NSSize(width: 800, height: 520)) }
+                    }
+                }
                 Button("Settings…", systemImage: "gearshape") { openSettings() }.keyboardShortcut(",", modifiers: .command)
                 Divider()
                 Button("Clear Unpinned History…", systemImage: "trash", role: .destructive) { confirmClear = true }
@@ -189,7 +197,7 @@ struct HistoryView: View {
             Label(paused ? "Paused" : "Recording", systemImage: paused ? "pause.circle" : "checkmark.circle")
                 .foregroundStyle(paused ? Color.orange : Color.secondary)
             Text("·")
-            Text("\(filteredClips.count.formatted()) items")
+            Text("\(filteredClips.count.formatted()) \(filteredClips.count == 1 ? "item" : "items")")
             Spacer()
             Text(status.feedback ?? (pasteOnClick ? "Click to paste into \(paste.targetName)" : "Click to copy"))
                 .lineLimit(1)

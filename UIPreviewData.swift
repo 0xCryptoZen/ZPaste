@@ -3,7 +3,7 @@ import SwiftData
 
 /// A disposable, in-memory fixture for visual checks. It never starts clipboard recording.
 enum UIPreviewData {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--ui-preview") }
+    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--ui-preview") || Bundle.main.object(forInfoDictionaryKey: "ZPasteUIPreview") as? Bool == true }
 
     @MainActor
     static func populate(_ context: ModelContext) throws {
