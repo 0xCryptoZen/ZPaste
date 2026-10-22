@@ -94,12 +94,19 @@ extension VaultRepository {
             let metadata = try record.metadata()
             _ = try payload(record)
             if metadata.kind == .folder {
-                // Iterate a stable result set: changing folderID must not shrink the paged predicate.
-                try batches(request()) { clip in
-                    guard clip.folderID == id else { return }
-                    let value = try payload(clip)
-                    var metadata = try clip.metadata(); metadata.folderID = nil
-                    try write(metadata, payload: value, existing: clip)
+                // Save each shrinking first page. Pending updates must never be merged into an offset fetch.
+                var children = request(scope: .folder(id))
+                children.fetchLimit = VaultLimits.pageSize
+                while true {
+                    try checkLease()
+                    let clips = try context.fetch(children)
+                    if clips.isEmpty { break }
+                    for clip in clips {
+                        let value = try payload(clip)
+                        var metadata = try clip.metadata(); metadata.folderID = nil
+                        try write(metadata, payload: value, existing: clip)
+                    }
+                    try save()
                 }
             }
             try remove(record)
