@@ -17,6 +17,7 @@ struct VaultBenchmarks {
 
     @MainActor
     static func main() async throws {
+        setbuf(stdout, nil)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let key = SymmetricKey(size: .bits256)
