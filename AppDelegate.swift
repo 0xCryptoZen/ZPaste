@@ -8,22 +8,17 @@ extension Notification.Name {
 
 /// Starts clipboard monitoring, registers the global hotkey, and hosts the history window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var monitor: ClipboardMonitor?
+    private var quickPanel: NSPanel?
     private var historyWindow: NSWindow?
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             NSApp.setActivationPolicy(.accessory)
-            if UIPreviewData.enabled {
-                do { try UIPreviewData.populate(Store.container.mainContext) }
-                catch { AppStatus.shared.errorMessage = error.localizedDescription }
-                showHistory()
-            } else {
+            VaultSession.shared.start()
+            if UIPreviewData.enabled { showHistory() }
+            else {
                 PasteController.shared.start()
-                let monitor = ClipboardMonitor(modelContext: Store.container.mainContext)
-                self.monitor = monitor
-                monitor.start()
                 do { try HotKeyManager.shared.registerSaved() }
                 catch { AppStatus.shared.errorMessage = error.localizedDescription }
             }
@@ -32,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             forName: .quickPasteHotKey, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.showHistory() }
+            MainActor.assumeIsolated { self?.showQuickPanel() }
         }
 
         NotificationCenter.default.addObserver(
@@ -49,17 +44,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
-            self.monitor?.stop()
+            VaultSession.shared.stop()
             PasteController.shared.stop()
             HotKeyManager.shared.unregister()
         }
     }
 
     @MainActor
+    private func showQuickPanel() {
+        PasteController.shared.rememberFrontmostApplication()
+        if quickPanel == nil {
+            let panel = NSPanel(contentViewController: NSHostingController(rootView: QuickPasteView()))
+            panel.title = "ZPaste"
+            panel.styleMask = [.titled, .closable]
+            panel.level = .floating
+            panel.hidesOnDeactivate = true
+            panel.setContentSize(NSSize(width: 500, height: 540))
+            panel.isReleasedWhenClosed = false
+            quickPanel = panel
+        }
+        if let panel = quickPanel, !panel.isVisible { panel.center() }
+        NSApp.activate(ignoringOtherApps: true)
+        quickPanel?.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor
     private func showHistory() {
         PasteController.shared.rememberFrontmostApplication()
         if historyWindow == nil {
-            let root = HistoryView().modelContainer(Store.container)
+            let root = HistoryView()
             let hosting = NSHostingController(rootView: root)
             let window = NSWindow(contentViewController: hosting)
             window.title = "ZPaste"
@@ -80,7 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showSettings() {
         if settingsWindow == nil {
             let root = SettingsView { [weak self] in self?.settingsWindow?.performClose(nil) }
-                .modelContainer(Store.container)
             let window = NSWindow(contentViewController: NSHostingController(rootView: root))
             window.title = "ZPaste Settings"
             window.toolbarStyle = .unified

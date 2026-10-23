@@ -13,17 +13,29 @@ targets:
           - "*.entitlements"
           - "project.yml"
           - "Info.plist"
-          - "README.md"
+          - "*.md"
+          - ".gitignore"
           - ".git"
           - ".github"
+          - "*.xcodeproj"
+          - "*.xcworkspace"
+          - "DerivedData"
+          - "build"
           - "Tests"
           - "scripts"
+          - "HistoryMaintenance.swift" # Legacy plaintext writer is test-only, never linked into the app.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.zpaste
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Info.plist
         SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: ZPaste.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 schemes:
   ZPaste:
     build:

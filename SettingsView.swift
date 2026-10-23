@@ -1,7 +1,6 @@
 import AppKit
 import ApplicationServices
 import ServiceManagement
-import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -20,7 +19,7 @@ struct SettingsView: View {
     }
 
     var onClose: () -> Void = {}
-    @Environment(\.modelContext) private var context
+    @ObservedObject private var vault = VaultSession.shared
     @State private var page: Page? = .general
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var trusted = AXIsProcessTrusted()
@@ -28,9 +27,14 @@ struct SettingsView: View {
     @State private var newID = ""
     @State private var errorMessage: String?
     @State private var confirmClear = false
+    @State private var confirmDeleteAll = false
+    @State private var confirmPolicy = false
+    @State private var proposedDays = 7
+    @State private var proposedLimit = 500
+    @AppStorage("legacyPolicyPending") private var legacyPolicyPending = false
     @AppStorage("pasteOnClick") private var pasteOnClick = true
-    @AppStorage("retentionDays") private var retentionDays = 0
-    @AppStorage("historyLimit") private var historyLimit = 0
+    @AppStorage("retentionDays") private var retentionDays = 7
+    @AppStorage("historyLimit") private var historyLimit = 500
     @AppStorage("capturePaused") private var paused = false
     @AppStorage("mergeDuplicates") private var mergeDuplicates = true
     @AppStorage("ignoreConfidential") private var ignoreConfidential = true
@@ -64,8 +68,7 @@ struct SettingsView: View {
             Button("Close Settings", action: onClose).keyboardShortcut("w", modifiers: .command).hidden()
         }
         .onKeyPress(.escape) { onClose(); return .handled }
-        .onChange(of: retentionDays) { _, _ in policyChanged() }
-        .onChange(of: historyLimit) { _, _ in policyChanged() }
+        .onChange(of: paused) { _, _ in vault.updateMonitoring() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             trusted = AXIsProcessTrusted()
             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -75,10 +78,19 @@ struct SettingsView: View {
         } message: { Text(errorMessage ?? "") }
         .confirmationDialog("Clear all unpinned history?", isPresented: $confirmClear) {
             Button("Clear Unpinned History", role: .destructive) {
-                do { try HistoryMaintenance.clearUnpinned(in: context) }
-                catch { context.rollback(); errorMessage = error.localizedDescription }
+                Task { _ = await vault.mutate { try await $0.clear(includePinned: false) } }
             }
         } message: { Text("This cannot be undone. Pinned items and folders will be kept.") }
+        .confirmationDialog("Delete ALL history, including pins and folders?", isPresented: $confirmDeleteAll) {
+            Button("Authenticate and Delete Everything", role: .destructive) { vault.deleteEverything() }
+        } message: { Text("You must verify your identity again. This cannot be undone. Existing backups and past iCloud copies are not erased.") }
+        .confirmationDialog("Apply these history limits?", isPresented: $confirmPolicy) {
+            Button("Apply and Clean History", role: .destructive) {
+                retentionDays = proposedDays; historyLimit = proposedLimit
+                legacyPolicyPending = false
+                policyChanged()
+            }
+        } message: { Text("Older or excess unpinned history will be removed immediately. Pinned items are kept.") }
     }
 
     private var general: some View {
@@ -123,8 +135,15 @@ struct SettingsView: View {
                     Button("Open Settings…") { PasteController.openAccessibilitySettings() }
                 }
             }
-            Section("Sync") {
-                Text("iCloud sync is not enabled in the downloadable build. History is stored on this Mac.")
+            Section("Local Encrypted Storage") {
+                Label(vault.isUnlocked ? "Unlocked · Stored only on this Mac" : "Locked · Recording stopped", systemImage: "lock.shield")
+                Text("AES-256-GCM encryption. A device-only Keychain key requires Touch ID or your system password. No iCloud sync, analytics, or plaintext export.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let error = vault.errorMessage { Text(error).font(.caption).foregroundStyle(.orange) }
+                Button(vault.isUnlocked ? "Lock Now" : "Unlock History") {
+                    if vault.isUnlocked { vault.lock() } else { vault.unlock() }
+                }.disabled(vault.state == .unlocking || vault.state == .deleting)
+                Text("Direct paste uses Accessibility access. This build does not claim full App Sandbox isolation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -133,14 +152,24 @@ struct SettingsView: View {
     private var history: some View {
         Group {
             Section("Keep History") {
-                Picker("Retention", selection: $retentionDays) {
+                if legacyPolicyPending {
+                    Label("Your old history and limits were preserved", systemImage: "info.circle")
+                    Button("Use Recommended Limits: 7 Days / 500 Items…") {
+                        proposedDays = 7; proposedLimit = 500; confirmPolicy = true
+                    }
+                }
+                Picker("Retention", selection: Binding(get: { retentionDays }, set: {
+                    proposedDays = $0; proposedLimit = historyLimit; confirmPolicy = true
+                })) {
                     Text("1 day").tag(1)
                     Text("1 week").tag(7)
                     Text("1 month (30 days)").tag(30)
                     Text("1 year (365 days)").tag(365)
                     Text("Forever").tag(0)
                 }
-                Picker("Maximum unpinned items", selection: $historyLimit) {
+                Picker("Maximum unpinned items", selection: Binding(get: { historyLimit }, set: {
+                    proposedDays = retentionDays; proposedLimit = $0; confirmPolicy = true
+                })) {
                     Text("100").tag(100)
                     Text("500").tag(500)
                     Text("1,000").tag(1_000)
@@ -149,11 +178,17 @@ struct SettingsView: View {
                 }
                 Text("Applies to unpinned items, including those in folders. Shortening these limits immediately removes older history.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }
+                Text("New text: up to 256 KiB. Encrypted payload capacity: 20 MiB. Existing oversized history is preserved, but recording stops until it fits.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if vault.isUnlocked {
+                    LabeledContent("Encrypted payload", value: ByteCountFormatter.string(fromByteCount: Int64(vault.summary.payloadBytes), countStyle: .file))
+                }
+                Button("Clear Unpinned History…", role: .destructive) { confirmClear = true }.disabled(!vault.isUnlocked)
+                Button("Delete ALL History…", role: .destructive) { confirmDeleteAll = true }.disabled(!vault.isUnlocked || UIPreviewData.enabled)
             }
             Section("Pinned Items") {
                 Label("Pins stay until you remove them", systemImage: "pin")
-                Text("Pinned items are excluded from retention limits and bulk clearing. Removing a folder keeps its items in All History.")
+                Text("Pins are excluded from retention and unpinned clearing. Up to 100 new pins; existing excess pins are preserved. Delete ALL History includes pins and folders.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -166,7 +201,7 @@ struct SettingsView: View {
                 Text("Skips items marked as confidential by their source app. This does not detect every password or secret; add sensitive apps to the ignore list below.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Ignore temporary and automatically generated items", isOn: $ignoreTransient)
-                Text("Filters future copies only. Existing history is unchanged.")
+                Text("Filters future copies only. Existing history is unchanged. Source detection cannot reliably identify all passwords, private keys, or recovery phrases.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Ignored Apps") {

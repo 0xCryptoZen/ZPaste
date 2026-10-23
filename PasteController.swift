@@ -21,12 +21,14 @@ final class PasteController: ObservableObject {
     }
 
     func stop() {
-        delivery?.cancel()
+        cancelDelivery()
         if let activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         }
         activationObserver = nil
     }
+
+    func cancelDelivery() { delivery?.cancel(); delivery = nil }
 
     func rememberFrontmostApplication() {
         if let app = NSWorkspace.shared.frontmostApplication { remember(app) }
@@ -41,6 +43,7 @@ final class PasteController: ObservableObject {
 
     func copy(_ text: String) {
         guard !UIPreviewData.enabled else { AppStatus.shared.previewed(); return }
+        guard VaultSession.shared.isUnlocked else { return }
         delivery?.cancel()
         if ClipboardMonitor.write(text) { AppStatus.shared.copied() }
         else { showError("Could not write to the clipboard.") }
@@ -48,6 +51,7 @@ final class PasteController: ObservableObject {
 
     func select(_ text: String, forcePaste: Bool = false) {
         guard !UIPreviewData.enabled else { AppStatus.shared.previewed(); return }
+        guard VaultSession.shared.isUnlocked else { return }
         delivery?.cancel()
         guard ClipboardMonitor.write(text) else {
             showError("Could not write to the clipboard.")
@@ -79,12 +83,12 @@ final class PasteController: ObservableObject {
         delivery = Task { @MainActor in
             // Activation is asynchronous. Wait for the real destination, then let its field regain focus.
             for _ in 0..<40 {
-                guard !Task.isCancelled, !target.isTerminated else { return }
+                guard !Task.isCancelled, VaultSession.shared.isUnlocked, !target.isTerminated else { return }
                 if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { break }
                 do { try await Task.sleep(for: .milliseconds(25)) } catch { return }
             }
             do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
-            guard PasteDeliveryPolicy.canSend(
+            guard VaultSession.shared.isUnlocked, PasteDeliveryPolicy.canSend(
                 targetPID: target.processIdentifier,
                 frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
                 ownPID: ProcessInfo.processInfo.processIdentifier,

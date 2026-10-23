@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 
 @main
 struct ZPasteApp: App {
@@ -12,7 +11,6 @@ struct ZPasteApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
-                .modelContainer(Store.container)
         } label: {
             Label("z-paste", systemImage: "doc.on.clipboard")
         }
