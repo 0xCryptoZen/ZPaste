@@ -5,6 +5,7 @@ Automated tests and the unsigned CI app are development evidence. This checklist
 ## Signed device checks
 
 - [ ] Stable bundle identifier and Developer ID identity; inspect actual signature, entitlements, and Hardened Runtime. No debug entitlement in the Release build.
+- [ ] The embedded Apple provisioning profile authorizes the signed application identifier and single-app Keychain access group. Check profile expiration; do not treat an expiring Personal Team profile as distribution signing.
 - [ ] Fresh installation: creating a Keychain item still requires authentication before recording or showing history.
 - [ ] With Touch ID unavailable, authenticate using the system password. Cancellation and failed authentication leave history locked.
 - [ ] Revoke Keychain access or temporarily hide the original key in an isolated test account. Existing history must remain intact; no replacement key or plaintext store is created. Restore the original key afterward.

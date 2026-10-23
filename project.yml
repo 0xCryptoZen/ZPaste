@@ -17,6 +17,10 @@ targets:
           - ".gitignore"
           - ".git"
           - ".github"
+          - "*.xcodeproj"
+          - "*.xcworkspace"
+          - "DerivedData"
+          - "build"
           - "Tests"
           - "scripts"
           - "HistoryMaintenance.swift" # Legacy plaintext writer is test-only, never linked into the app.
@@ -29,6 +33,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: ZPaste.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 schemes:
   ZPaste:
     build:

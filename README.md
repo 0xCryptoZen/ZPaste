@@ -53,6 +53,8 @@ open ZPaste.xcodeproj
 
 Use a stable bundle ID and a signing identity appropriate for macOS Data Protection Keychain access. Do not remove the Keychain ACL or switch to a less protected Keychain to make an unsigned development build work. Unsigned CI artifacts prove compilation and synthetic tests only; Keychain, Touch ID/system password, lock-screen behavior, and Accessibility require signed, on-device validation.
 
+Select your team and enable automatic signing in the generated Xcode project's Signing & Capabilities settings. The single-app Keychain access group requires an Apple provisioning profile; a certificate alone is insufficient. Verify that the signed app contains its profile-authorized application identifier and Keychain group. Release disables automatic base-entitlement injection so development signing does not add `get-task-allow`. Personal Team development profiles expire and are not a substitute for Developer ID distribution and notarization. Team IDs and signing credentials belong in local configuration, not this repository; generating the project again resets local team selection.
+
 ```sh
 bash scripts/test-policies.sh
 bash scripts/test-presentation.sh
